@@ -35,7 +35,10 @@ export default function App() {
   const [localStream, setLocalStream] = useState<MediaStream | null>();
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>();
   const [gettingCall, setGettingCall] = useState(false);
-  const pc = useRef<RTCPeerConnection>();
+  const pc = useRef<RTCPeerConnection>(
+    new RTCPeerConnection({
+    })
+  );
   const connecting = useRef(false);
 
   useEffect(() => {
@@ -77,7 +80,9 @@ export default function App() {
     //get the audio and video stream for the call
     if (stream) {
       setLocalStream(stream)
-      pc.current.addStream(stream)
+      localStream?.getTracks().forEach(track => {
+        pc.current.addTrack
+      })
     }
     pc.current.onaddstream = (event: EventOnAddStream) => {
       setRemoteStream(event.stream)
