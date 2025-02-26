@@ -3,10 +3,10 @@ import { StyleSheet, View } from "react-native";
 // import { Icon } from "react-native-vector-icons/";
 import Icon from 'react-native-vector-icons/FontAwesome';
 interface Props {
-    onPress?: any,
-    iconName: string,
-    backgroundColor: string,
-    style?: any,
+    onPress?: any;
+    iconName: string;
+    backgroundColor: string;
+    style?: any;
 }
 export default function Button(props: Props) {
     return (

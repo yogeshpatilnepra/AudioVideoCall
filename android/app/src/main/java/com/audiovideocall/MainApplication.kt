@@ -11,9 +11,9 @@ import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
-import com.oney.WebRTCModule.WebRTCModuleOptions;
-import android.media.AudioAttributes
-import org.webrtc.audio.JavaAudioDeviceModule;
+// import com.oney.WebRTCModule.WebRTCModuleOptions;
+// import android.media.AudioAttributes
+// import org.webrtc.audio.JavaAudioDeviceModule;
 
 class MainApplication : Application(), ReactApplication {
 
@@ -44,15 +44,15 @@ class MainApplication : Application(), ReactApplication {
       // If you opted-in for the New Architecture, we load the native entry point for this app.
       load()
     }
-    val options = WebRTCModuleOptions.getInstance()
-    val audioAttributes =
-            AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-    options.audioDeviceModule =
-            JavaAudioDeviceModule.builder(this)
-                    .setAudioAttributes(audioAttributes)
-                    .createAudioDeviceModule()
+    // val options = WebRTCModuleOptions.getInstance()
+    // val audioAttributes =
+    //         AudioAttributes.Builder()
+    //                 .setUsage(AudioAttributes.USAGE_MEDIA)
+    //                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+    //                 .build()
+    // options.audioDeviceModule =
+    //         JavaAudioDeviceModule.builder(this)
+    //                 .setAudioAttributes(audioAttributes)
+    //                 .createAudioDeviceModule()
   }
 }

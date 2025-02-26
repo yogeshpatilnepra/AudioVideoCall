@@ -1,36 +1,26 @@
 {
   "project_info": {
-    "project_number": "642226961243",
-    "project_id": "demotest-2886f",
-    "storage_bucket": "demotest-2886f.firebasestorage.app"
+    "project_number": "776966973353",
+    "project_id": "audiovideocall-92169",
+    "storage_bucket": "audiovideocall-92169.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:642226961243:android:7c057f783e38e0813a787e",
+        "mobilesdk_app_id": "1:776966973353:android:fc0fd3df52d527da6fc6b8",
         "android_client_info": {
           "package_name": "com.audiovideocall"
         }
       },
-      "oauth_client": [
-        {
-          "client_id": "642226961243-io26kblt7nf54dn4rh0mpninjt4o5ti2.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
+      "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyC2dqHw68-bdUz7Mg_6yjSCwQ-bYAqhwCg"
+          "current_key": "AIzaSyBa1TRgIsn1uGDYOFYYy46ooc8tURwBzWU"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "642226961243-io26kblt7nf54dn4rh0mpninjt4o5ti2.apps.googleusercontent.com",
-              "client_type": 3
-            }
-          ]
+          "other_platform_oauth_client": []
         }
       }
     }
