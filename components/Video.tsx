@@ -17,6 +17,9 @@ function ButtonContainer(props: Props) {
         </View>
     )
 }
+const changeCameraPosition = ()=>{
+    console.log("Call")
+}
 export default function Video(props: Props) {
     //on call we will just display the local stream
     if (props.localStream && !props.remoteStream) {
@@ -26,6 +29,7 @@ export default function Video(props: Props) {
                 objectFit={'cover'}
                 style={styles.video} />
             <ButtonContainer hangup={props.hangup} />
+            
         </View>
     }
     //once the call is connected we will display
@@ -41,6 +45,7 @@ export default function Video(props: Props) {
                 objectFit={'cover'}
                 style={styles.videoLocal} />
             <ButtonContainer hangup={props.hangup} />
+            {/* <Button iconName='cameraswitch' onPress={changeCameraPosition} backgroundColor='grey' style={{ marginTop: 10 }} /> */}
         </View>
     }
     return <ButtonContainer hangup={props.hangup} />

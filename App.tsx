@@ -7,29 +7,16 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ScrollView,
-  StatusBar,
   StyleSheet,
-  Text,
-  useColorScheme,
-  View,
+  View
 } from 'react-native';
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
+import { MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription } from 'react-native-webrtc';
 import Button from './components/Button';
 import GettingCall from './components/GettingCall';
-import Video from './components/Video';
-import { MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription } from 'react-native-webrtc';
 import Utils from './components/Utils';
-import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
-import RTCTrackEvent from 'react-native-webrtc/lib/typescript/RTCTrackEvent';
-import AudioCallScreen from './components/AudioCallScreen';
+import Video from './components/Video';
 
 const configuration = { "iceServers": [{ "url": "stun:stun.1.google.com:19302" }] };
 export default function App() {
@@ -75,65 +62,54 @@ export default function App() {
     }
   }, [])
 
-  const setupWebrtc = async () => {
+  const setupWebrtc = async (audioOnly = false) => {
     pc.current = new RTCPeerConnection(configuration);
-    const stream = await Utils.getStream(isAudioCall);
+    const stream = audioOnly ? await Utils.getAudioStream() : await Utils.getStream();
 
     //get the audio and video stream for the call
     if (stream) {
       setLocalStream(stream)
       stream.getTracks().forEach(track => {
-        if (isAudioCall && track.kind === "video") {
-          track.enabled = false;
-        }
         pc.current?.addTrack(track, stream);
       });
     }
     (pc.current as any).ontrack = (event: any) => {
       const [remoteStream] = event.streams;
-      setRemoteStream(event.streams[0]);
+      setRemoteStream(remoteStream);
     };
   }
   const create = async () => {
-    // console.log("Calling")
-    setIsAudioCall(false);
+
     connecting.current = true;
     //set up webrtc 
+    setIsAudioCall(false);
     await setupWebrtc();
     //documents for the call
     const cref = firestore().collection("meet").doc("chatId");
     collectIceCandidates(cref, "caller", "callee")
     if (pc.current) {
       const offer = await pc.current.createOffer({});
-      await pc.current.setLocalDescription(offer);
-      // const cWithOffer = {
-      //   offer: {
-      //     type: offer.type,
-      //     sdp: offer.sdp
-      //   },
-      // };
-      await cref.set({ offer })
+      pc.current.setLocalDescription(offer);
+      const cWithOffer = {
+        offer: {
+          type: offer.type,
+          sdp: offer.sdp
+        },
+      };
+      await cref.set(cWithOffer)
     }
   }
 
   const audioCall = async () => {
-    setIsAudioCall(true);
     connecting.current = true;
-    await setupWebrtc();
+    setIsAudioCall(true);
+    await setupWebrtc(true);
     const cref = firestore().collection("meet").doc("chatId");
     collectIceCandidates(cref, "caller", "callee");
-
     if (pc.current) {
       const offer = await pc.current.createOffer({});
-      await pc.current.setLocalDescription(offer);
-
-      // const cWithOffer = {
-      //   offer: {
-      //     type: offer.type,
-      //     sdp: offer.sdp
-      //   },
-      // };
-      await cref.set({ offer });
+      pc.current.setLocalDescription(offer);
+      await cref.set({ offer: { type: offer.type, sdp: offer.sdp } });
     }
   }
 
@@ -144,46 +120,45 @@ export default function App() {
     const offer = (await cref.get()).data()?.offer;
     if (offer) {
       //set up webrtc
-      await setupWebrtc();
+      await setupWebrtc(isAudioCall);
       // Exchange the ICE Candidates
       // check the paramaters , its reveresd. since the joinig part is callee
       collectIceCandidates(cref, "callee", "caller")
       if (pc.current) {
-        await pc.current.setRemoteDescription(new RTCSessionDescription(offer));
+        pc.current.setRemoteDescription(new RTCSessionDescription(offer));
         // create the answer for the call
         //check the paramreters ,its reversed. since the joining part is callee
         const answer = await pc.current.createAnswer();
-        await pc.current.setLocalDescription(answer);
-        // const cWithAnswer = {
-        //   answer: {
-        //     type: answer.type,
-        //     sdp: answer.sdp
-        //   },
-        // };
-        await cref.update({ answer })
+        pc.current.setLocalDescription(answer);
+        const cWithAnswer = {
+          answer: {
+            type: answer.type,
+            sdp: answer.sdp
+          },
+        };
+        await cref.update(cWithAnswer);
       }
     }
 
   }
   const hangup = async () => {
-    setGettingCall(false)
+    setGettingCall(false);
     connecting.current = false;
+    streamCleanup();
+    firestoreCleanup();
     if (pc.current) {
       pc.current.close();
     }
-    streamCleanup();
-    firestoreCleanup();
-  }
+  };
 
   const streamCleanup = async () => {
-    // if (localStream) {
-
-    //   localStream.release();
-    // }
-    localStream?.getTracks().forEach(t => t.stop());
+    if (localStream) {
+      localStream.getTracks().forEach(t => t.stop());
+      localStream.release();
+    }
     setLocalStream(null);
     setRemoteStream(null);
-  }
+  };
 
   const firestoreCleanup = async () => {
     const cref = firestore().collection("meet").doc("chatId");
@@ -214,7 +189,6 @@ export default function App() {
           candidateCollection.add(event.candidate);
         }
       };
-
     }
     cref.collection(remoteName).onSnapshot(snapshot => {
       snapshot.docChanges().forEach((change: any) => {
@@ -232,24 +206,16 @@ export default function App() {
   }
   //display local stream on calling
   // displays both local and remote stream once call is connected
+  // if (localStream) {
+  //   if (!isAudioCall) {
+  //     return <Video hangup={hangup} localStream={localStream} remoteStream={remoteStream} />
+  //   } else {
+  //     return <AudioCallScreen hangup={hangup} remoteStream={remoteStream} />
+  //   }
+  // }
+
   if (localStream) {
-
-    // if (!isAudioCall) {
-    //   return <Video hangup={hangup} localStream={localStream} remoteStream={remoteStream} />
-    // } else {
-    //   return <AudioCallScreen hangup={hangup} remoteStream={remoteStream} />
-    //   // console.log("Audio Call")
-    // }
-    return isAudioCall ? (
-      <AudioCallScreen hangup={hangup} remoteStream={remoteStream} />
-    ) : (
-      <Video hangup={hangup} localStream={localStream} remoteStream={remoteStream} />
-    );
-
-    // return <Video
-    //   hangup={hangup}
-    //   localStream={localStream}
-    //   remoteStream={remoteStream} />
+    return <Video hangup={hangup} localStream={localStream} remoteStream={remoteStream} />;
   }
 
   //displays the call button 
