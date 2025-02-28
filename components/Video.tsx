@@ -1,6 +1,7 @@
 import { StyleSheet, View } from "react-native";
 import { MediaStream, RTCView } from "react-native-webrtc";
 import Button from "./Button";
+import { Text } from "react-native";
 
 interface Props {
     hangup: () => void;
@@ -17,7 +18,7 @@ function ButtonContainer(props: Props) {
         </View>
     )
 }
-const changeCameraPosition = ()=>{
+const changeCameraPosition = () => {
     console.log("Call")
 }
 export default function Video(props: Props) {
@@ -27,9 +28,9 @@ export default function Video(props: Props) {
             <RTCView
                 streamURL={props.localStream.toURL()}
                 objectFit={'cover'}
-                style={styles.video} />
+                style={styles.video} />            
             <ButtonContainer hangup={props.hangup} />
-            
+
         </View>
     }
     //once the call is connected we will display
@@ -44,6 +45,7 @@ export default function Video(props: Props) {
                 streamURL={props.localStream.toURL()}
                 objectFit={'cover'}
                 style={styles.videoLocal} />
+                <Text style={styles.callText}>Video Call Screen</Text>
             <ButtonContainer hangup={props.hangup} />
             {/* <Button iconName='cameraswitch' onPress={changeCameraPosition} backgroundColor='grey' style={{ marginTop: 10 }} /> */}
         </View>
@@ -64,6 +66,12 @@ const styles = StyleSheet.create({
         position: 'absolute',
         width: '100%',
         height: '100%'
+    },
+    callText: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: 'red',
+        marginBottom: 30,
     },
     videoLocal: {
         position: 'absolute',

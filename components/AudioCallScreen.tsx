@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { MediaStream } from "react-native-webrtc";
 import Button from "./Button";
@@ -20,13 +20,21 @@ function ButtonContainer(props: Props) {
 
 export default function AudioCallScreen(props: Props) {
     const [callDuration, setCallDuration] = useState(0);
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
-        const interval = setInterval(() => {
-            setCallDuration(prev => prev + 1);
-        }, 1000);
-        return () => clearInterval(interval);
-    }, []);
+        if (props.remoteStream) {
+            timerRef.current = setInterval(() => {
+                setCallDuration(prev => prev + 1);
+            }, 1000);
+        }
+
+        return () => {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+            }
+        }
+    }, [props.remoteStream]);
 
     const formatTime = (seconds: number) => {
         const min = Math.floor(seconds / 60);
@@ -62,6 +70,6 @@ const styles = StyleSheet.create({
     timer: {
         fontSize: 18,
         color: 'white',
-        marginBottom: 20,
+        marginBottom: 35,
     }
 })
