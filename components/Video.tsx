@@ -28,7 +28,7 @@ export default function Video(props: Props) {
             <RTCView
                 streamURL={props.localStream.toURL()}
                 objectFit={'cover'}
-                style={styles.video} />            
+                style={styles.video} />
             <ButtonContainer hangup={props.hangup} />
 
         </View>
@@ -40,12 +40,13 @@ export default function Video(props: Props) {
             <RTCView
                 streamURL={props.remoteStream.toURL()}
                 objectFit={'cover'}
+                mirror={true}
                 style={styles.video} />
             <RTCView
                 streamURL={props.localStream.toURL()}
                 objectFit={'cover'}
                 style={styles.videoLocal} />
-                <Text style={styles.callText}>Video Call Screen</Text>
+            <Text style={styles.callText}>Video Call Screen</Text>
             <ButtonContainer hangup={props.hangup} />
             {/* <Button iconName='cameraswitch' onPress={changeCameraPosition} backgroundColor='grey' style={{ marginTop: 10 }} /> */}
         </View>

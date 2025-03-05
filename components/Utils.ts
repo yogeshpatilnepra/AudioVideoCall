@@ -32,7 +32,7 @@ export default class Utils {
                 height: 380,
                 frameRate: 30,
                 facingMode: (isFront ? "user" : "environment"),
-                deviceId: videoSourceId
+                deviceId: videoSourceId,
             }
         })
         if (typeof stream != 'boolean') return stream;

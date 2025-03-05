@@ -19,22 +19,32 @@ import GettingCall from './components/GettingCall';
 import Utils from './components/Utils';
 import Video from './components/Video';
 
-const configuration = { "iceServers": [{ "url": "stun:stun.1.google.com:19302" }] };
+const configuration = {
+  "iceServers": [
+    { "url": "stun:stun.1.google.com:19302" },
+    { "url": "stun:stun1.1.google.com:19302" },
+  ]
+};
 export default function App() {
 
-  const [localStream, setLocalStream] = useState<MediaStream | null>();
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>();
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [gettingCall, setGettingCall] = useState(false);
   const [isAudioCall, setIsAudioCall] = useState(false);
   const pc = useRef<RTCPeerConnection>(
     new RTCPeerConnection()
   );
   const connecting = useRef(false);
+  let stream: MediaStream | null = null;
 
   useEffect(() => {
     const cref = firestore().collection("meet").doc("chatId");
     const subscribe = cref.onSnapshot(snapshot => {
       const data = snapshot.data();
+
+      if (!data) {
+        hangup();
+      }
 
       // on  answer start the call
       if (pc.current && !pc.current.remoteDescription && data && data.answer) {
@@ -58,6 +68,7 @@ export default function App() {
       snapshot.docChanges().forEach(change => {
         if (change.type === "removed") {
           hangup();
+          console.log("OTHERUSERENDBUTTONCALL")
         }
       })
     })
@@ -70,12 +81,12 @@ export default function App() {
 
   const setupWebrtc = async (audioOnly = false) => {
     pc.current = new RTCPeerConnection(configuration);
-    const stream = audioOnly ? await Utils.getAudioStream() : await Utils.getStream();
+    stream = audioOnly ? await Utils.getAudioStream() : await Utils.getStream();
     //get the audio and video stream for the call
     if (stream) {
       setLocalStream(stream)
       stream.getTracks().forEach(track => {
-        pc.current?.addTrack(track, stream);
+        pc.current?.addTrack(track, stream!);
       });
     }
 
@@ -166,99 +177,56 @@ export default function App() {
     }
   }
   const hangup = async () => {
-    console.log("Hangup triggered, stopping streams");
     setGettingCall(false);
     connecting.current = false;
     setIsAudioCall(false);
 
-    await streamCleanup();
+    streamCleanup();
+    await firestoreCleanup();
 
     if (pc.current) {
-      console.log("Closing peer connection");
       pc.current.close();
       pc.current.restartIce();
       pc.current = new RTCPeerConnection(configuration);
     }
-
-    await firestoreCleanup();
-    setLocalStream(null);
-    setRemoteStream(null);
-    console.log("Hangup completed");
   };
-
-  // const streamCleanup = async () => {
-  //   if (localStream) {
-  //     localStream.getTracks().forEach(t => t.stop());
-  //     localStream?.release();
-  //     console.log("LOCALSTREAMMM release", localStream)
-
-  //     pc.current?.getSenders().forEach(sender => {
-  //       pc.current?.removeTrack(sender);
-  //     });
-  //   }
-  //   if (remoteStream) {
-  //     console.log("REMOTESSTREAMMM release", remoteStream)
-  //     remoteStream.getTracks().forEach(t => {
-  //       t.stop();
-  //     });
-  //   }
-  //   setLocalStream(null);
-  //   setRemoteStream(null);
-  // };
 
   const streamCleanup = async () => {
-    console.log("streamCleanup started");
-    if (localStream) {
-      console.log("Stopping localStream tracks:", localStream);
-    
-      pc.current.getTransceivers().forEach((transceiver) => {
-        console.log("closedd--->",transceiver)
-        transceiver.stop();
+    stream?.getTracks().forEach(track => {
+      console.log("trackss", track)
+      track.stop()
     });
-
-    localStream.getTracks().forEach(t => {
-      t.stop(); // Stop each local track
-      console.log("Track stopped:", t);
+    localStream?.getTracks().forEach(track => {
+      console.log("localstreamtrack", track)
+      track.stop()
     });
-
-      // Remove all senders from the peer connection
-      // pc.current?.getSenders().forEach(sender => {
-      //   console.log("Removing sender:", sender);
-      //   pc.current?.removeTrack(sender);
-      // });
-    }
-    // Do not attempt to stop remoteStream tracks here; rely on remote side cleanup
-    console.log("remoteStream present but not stopped locally:", remoteStream);
+    remoteStream?.getTracks().forEach(track => {
+      console.log("remotestreammmm", track)
+      track.stop()
+    });
+    stream = null;
     setLocalStream(null);
     setRemoteStream(null);
-    console.log("streamCleanup completed");
+    pc.current?.getSenders().forEach(sender => {
+      pc.current?.removeTrack(sender);
+    });
   };
-
 
   const firestoreCleanup = async () => {
     const cref = firestore().collection("meet").doc("chatId");
     const doc = await cref.get();
-    if (doc.exists) {
-      await cref.set({ hangup: true }, { merge: true });
-      const calleecandidate = await cref.collection("callee").get();
-      await Promise.all(calleecandidate.docs.map(candidate => candidate.ref.delete()));
 
+    if (cref) {
       const callercandidate = await cref.collection("caller").get();
-      await Promise.all(callercandidate.docs.map(candidate => candidate.ref.delete()));
+      callercandidate.forEach(async (candidate) => {
+        await candidate.ref.delete();
+      });
+      const calleecandidate = await cref.collection("callee").get();
+      calleecandidate.forEach(async (candidate) => {
+        await candidate.ref.delete();
+      });
       await cref.delete();
     }
-
-    // if (cref) {
-
-    //   // calleecandidate.forEach(async (candidate) => {
-    //   //   await candidate.ref.delete();
-    //   // })
-
-    //   callercandidate.forEach(async (candidate) => {
-    //     await candidate.ref.delete();
-    //   })
-
-    // }
   }
   //helper function
 
