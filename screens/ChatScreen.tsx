@@ -27,7 +27,6 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
     const [unreadCount, setUnreadCount] = useState(0);
     const [isAtBottom, setIsAtBottom] = useState(true);
     // const flatListRef = useRef<FlatList<ChatMessage> | null>(null);
-    // const flatListRef = useRef<FlatList>(null);
 
     useEffect(() => {
         const fetchInitialMessages = async () => {
@@ -68,9 +67,9 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                 });
                 setMessages(chatMessages);
                 // If at bottom, scroll to end automatically
-                // if (isAtBottom && chatMessages.length > 0) {
-                //     flatListRef.current?.scrollToEnd({ animated: false });
-                // }
+                if (isAtBottom && chatMessages.length > 0) {
+                    flatListRef.current?.scrollToEnd({ animated: false });
+                }
             });
         return () => {
             subscriber()
@@ -98,7 +97,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
 
     // Scroll to bottom on arrow click
     const scrollToBottom = () => {
-        // flatListRef.current?.scrollToEnd({ animated: true });
+        flatListRef.current?.scrollToEnd({ animated: true });
         setUnreadCount(0);
     };
 

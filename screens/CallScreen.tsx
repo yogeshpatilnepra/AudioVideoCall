@@ -18,7 +18,6 @@ import CustomButtonNew from '../components/CustomButton';
 import GettingCall from '../components/GettingCall';
 import Utils from '../components/Utils';
 import Video from '../components/Video';
-import Sound from 'react-native-sound';
 
 const configuration = {
     "iceServers": [
@@ -38,7 +37,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
     const [gettingCall, setGettingCall] = useState(false);
     const [isAudioCall, setIsAudioCall] = useState(false);
-    let ringtone: Sound | null = null;
     const pc = useRef<RTCPeerConnection>(
         new RTCPeerConnection()
     );
@@ -54,17 +52,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
     //switch
     const [isEnabled, setIsEnabled] = useState(false);
     const toggleSwitch = () => setIsEnabled(previousState => !previousState);
-
-    Sound.setCategory('Playback', true);
-
-    ringtone = new Sound('ringtone.mp3', Sound.MAIN_BUNDLE, (error) => {
-        if (error) {
-            console.log('Failed to load ringtone:', error);
-            return;
-        }
-        ringtone!.setNumberOfLoops(-1); // Loop indefinitely until stopped
-        console.log('Ringtone loaded successfully');
-    });
 
     useEffect(() => {
         if (!myId || !targetId) return;
@@ -156,16 +143,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
             await cref.delete().catch(() => console.log("No previous call doc to delete"));
             await cref.set({ hangup: false }, { merge: true });
 
-            //Start ringtone
-            if (ringtone) {
-                ringtone.play((success) => {
-                    if (!success) {
-                        console.log('Ringtone playback failed');
-                    }
-                });
-                console.log('Ringtone started for video call');
-            }
-
             const startRemoteCandidates = await collectIceCandidates(cref, myId, targetId);
             if (pc.current) {
                 const offer = await pc.current.createOffer({});
@@ -195,9 +172,7 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                             .then(() => {
 
                                 startRemoteCandidates();
-                                if (ringtone && ringtone.isPlaying()) {
-                                    ringtone.stop(() => console.log('Ringtone stopped on answer'));
-                                }
+                            
                             });
                         unsubscribe();
                     }
@@ -229,15 +204,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
             await cref.delete().catch(() => console.log("No previous call doc to delete"));
             await cref.set({ hangup: false }, { merge: true });
 
-            if (ringtone) {
-                ringtone.play((success) => {
-                    if (!success) {
-                        console.log('Ringtone playback failed');
-                    }
-                });
-                console.log('Ringtone started for audio call');
-            }
-
             const startRemoteCandidates = await collectIceCandidates(cref, myId, targetId);
             if (pc.current) {
                 const offer = await pc.current.createOffer({});
@@ -267,9 +233,7 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                             .then(() => {
 
                                 startRemoteCandidates();
-                                if (ringtone && ringtone.isPlaying()) {
-                                    ringtone.stop(() => console.log('Ringtone stopped on answer'));
-                                }
+                            
                             });
                         unsubscribe();
                     }
