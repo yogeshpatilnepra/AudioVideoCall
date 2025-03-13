@@ -1,32 +1,32 @@
-import { TouchableOpacity } from "react-native";
+import { Text, TouchableOpacity } from "react-native";
 import { StyleSheet, View } from "react-native";
 // import { Icon } from "react-native-vector-icons/";
 import Icon from 'react-native-vector-icons/FontAwesome';
 interface Props {
     onPress?: any;
-    iconName: string;
-    backgroundColor: string;
+    text?: string;
+    backgroundColor?: string;
     style?: any;
 }
-export default function CustomButton(props: Props) {
+export default function CustomButtonNew(props: Props) {
     return (
         <View>
             <TouchableOpacity onPress={props.onPress}
                 style={[{ backgroundColor: props.backgroundColor }, props.style, styles.button]}>
 
-                <Icon name={props.iconName} color='white' size={24} />
+                <Text style={{ color: 'white' }}>{props.text}</Text>
             </TouchableOpacity>
         </View>
     )
 }
 const styles = StyleSheet.create({
     button: {
-        width: 60,
-        height: 60,
+        width: "auto",
+        height: "auto",
         padding: 10,
         elevation: 10,
         justifyContent: 'center',
         alignItems: 'center',
-        borderRadius: 100,
+        borderRadius: 10,
     }
 })

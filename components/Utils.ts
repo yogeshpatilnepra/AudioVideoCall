@@ -10,10 +10,17 @@ import { mediaDevices, MediaStream } from "react-native-webrtc";
 
 declare global {
     var existingAudioStream: MediaStream | null;
+    var existingVideoStream: MediaStream | null;
 }
 
 export default class Utils {
     static async getStream() {
+
+        if (global.existingVideoStream) {
+            global.existingVideoStream.getVideoTracks().forEach(track => track.stop());
+            global.existingVideoStream = null;
+        }
+
         let isFront = true;
         const sourceInfos = await mediaDevices.enumerateDevices() as any[];
         console.log(sourceInfos);
@@ -25,17 +32,27 @@ export default class Utils {
                 videoSourceId = sourceInfo.deviceId;
             }
         }
-        const stream = await mediaDevices.getUserMedia({
-            audio: true,
-            video: {
-                width: 640,
-                height: 380,
-                frameRate: 30,
-                facingMode: (isFront ? "user" : "environment"),
-                deviceId: videoSourceId,
+        try {
+            const stream = await mediaDevices.getUserMedia({
+                audio: true,
+                video: {
+                    width: 640,
+                    height: 380,
+                    frameRate: 30,
+                    facingMode: (isFront ? "user" : "environment"),
+                    deviceId: videoSourceId,
+                }
+            })
+            if (stream) {
+                global.existingVideoStream = stream;
+                return stream;
             }
-        })
-        if (typeof stream != 'boolean') return stream;
+
+        } catch (error) {
+            console.error("Error accessing video devices:", error);
+        }
+
+        // if (typeof stream != 'boolean') return stream;
         return null;
     }
 

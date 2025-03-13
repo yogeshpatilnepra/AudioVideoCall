@@ -1,7 +1,7 @@
 import { StyleSheet } from "react-native";
 import { TouchableOpacity } from "react-native";
 import { View } from "react-native";
-import Button from "./Button";
+import CustomButton from "./Button";
 
 interface Props {
     hangup: () => void;
@@ -11,9 +11,9 @@ export default function GettingCall(props: Props) {
     return (
         <View style={styles.container}>
             <View style={styles.bContainer}>
-                <Button iconName='phone' backgroundColor='green' onPress={props.join}
+                <CustomButton iconName='phone' backgroundColor='green' onPress={props.join}
                     style={{ marginRight: 30 }} />
-                <Button iconName='phone' backgroundColor='red' onPress={props.hangup} style={{ marginLeft: 30 }} />
+                <CustomButton iconName='phone' backgroundColor='red' onPress={props.hangup} style={{ marginLeft: 30 }} />
             </View>
         </View>
     )
@@ -24,6 +24,7 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'flex-end',
         alignItems: 'center',
+        backgroundColor: '#000'
     },
     image: {
         position: 'absolute',
