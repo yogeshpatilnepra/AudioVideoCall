@@ -10,6 +10,7 @@ import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firest
 import { NavigationProp } from '@react-navigation/native';
 import { useEffect, useRef, useState } from 'react';
 import { Button, FlatList, Switch, Text, TouchableOpacity } from 'react-native';
+import inCallManager from 'react-native-incall-manager';
 import { MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription } from 'react-native-webrtc';
 import { RootStackParamList } from '../App';
 import AudioCallScreen from '../components/AudioCallScreen';
@@ -63,13 +64,10 @@ export default function CallScreen({ navigation }: CallScreenProps) {
 
         const subscribe = cref.onSnapshot(snapshot => {
             const data = snapshot.data();
-            console.log("Snapshot data for incoming callId:", callId, data);
             if (data && data.offer && data.targetId === myId && !connecting.current) {
-                console.log("Incoming call detected for", myId, "with offer:", data.offer);
                 setGettingCall(true);
             }
             if (snapshot.exists && data?.hangup) {
-                console.log("Detected hangup signal from Firestore (incoming)");
                 hangup();
             }
         });
@@ -77,7 +75,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
         const subscribeOutgoing = outgoingCref.onSnapshot(snapshot => {
             const data = snapshot.data();
             if (snapshot.exists && data?.hangup) {
-                console.log("Detected hangup signal from Firestore (outgoing)");
                 hangup();
             }
         });
@@ -85,13 +82,18 @@ export default function CallScreen({ navigation }: CallScreenProps) {
         const subscrbeDelete = cref.collection(myId).onSnapshot(snapshot => {
             snapshot.docChanges().forEach(change => {
                 if (change.type === "removed") {
-                    console.log("OTHERUSERENDBUTTONCALL");
                     hangup();
                 }
             });
         });
 
+        //start the ringtone
+        inCallManager.start({ media: "audio" })
+        console.log('InCallManager initialized');
+
         return () => {
+            inCallManager.stop();
+            console.log('InCallManager stopped');
             subscribe();
             subscribeOutgoing();
             subscrbeDelete();
@@ -114,12 +116,10 @@ export default function CallScreen({ navigation }: CallScreenProps) {
         }
         setLocalStream(stream);
         stream.getTracks().forEach(track => {
-            console.log("Adding track:", track.kind);
             pc.current?.addTrack(track, stream!);
         });
 
         (pc.current as any).ontrack = (event: any) => {
-            console.log("Received remote stream:", event.streams[0]);
             setRemoteStream(event.streams[0]);
         };
     };
@@ -154,7 +154,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                     targetId: targetId,
                     hangup: false
                 };
-                console.log("Setting offer for callId:", callId, cWithOffer);
                 await cref.set(cWithOffer)
                     .then(() => console.log("Offer successfully written to Firestore"))
                     .catch(error => { throw new Error("Failed to write offer: " + error.message); });
@@ -167,12 +166,11 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                 const unsubscribe = cref.onSnapshot(snapshot => {
                     const data = snapshot.data();
                     if (data && data.answer && !pc.current.remoteDescription) {
-                        console.log("Setting remote answer:", data.answer);
                         pc.current.setRemoteDescription(new RTCSessionDescription(data.answer))
                             .then(() => {
 
                                 startRemoteCandidates();
-                            
+
                             });
                         unsubscribe();
                     }
@@ -215,7 +213,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                     targetId: targetId,
                     hangup: false
                 };
-                // console.log("Setting offer for callId:", callId, cWithOffer);
                 await cref.set(cWithOffer)
                     .then(() => console.log("Offer successfully written to Firestore"))
                     .catch(error => { throw new Error("Failed to write offer: " + error.message); });
@@ -228,12 +225,9 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                 const unsubscribe = cref.onSnapshot(snapshot => {
                     const data = snapshot.data();
                     if (data && data.answer && !pc.current.remoteDescription) {
-                        // console.log("Setting remote answer:", data.answer);
                         pc.current.setRemoteDescription(new RTCSessionDescription(data.answer))
                             .then(() => {
-
                                 startRemoteCandidates();
-                            
                             });
                         unsubscribe();
                     }
@@ -252,7 +246,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
         setGettingCall(false);
         const callId = `${targetId}_${myId}`;
         const cref = firestore().collection("meet").doc(callId);
-        console.log("Attempting to join call with callId:", callId);
 
         // Retry logic to wait for offer
         const waitForOffer = async (maxRetries = 5, delayMs = 1000): Promise<any> => {
@@ -260,10 +253,8 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                 const doc = await cref.get();
                 const offer = doc.data()?.offer;
                 if (offer) {
-                    console.log("Offer found:", offer);
                     return { offer, callType: doc.data()?.callType || "video" };
                 }
-                console.log(`Offer not found on attempt ${i + 1}/${maxRetries}, waiting...`);
                 await new Promise(resolve => setTimeout(resolve, delayMs));
             }
             throw new Error("Offer not found after retries");
@@ -278,7 +269,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
             const startRemoteCandidates = await collectIceCandidates(cref, myId, targetId);
 
             if (pc.current) {
-                console.log("Setting remote offer:", offer);
                 await pc.current.setRemoteDescription(new RTCSessionDescription(offer));
                 startRemoteCandidates();
                 const answer = await pc.current.createAnswer();
@@ -287,7 +277,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                     answer: { type: answer.type, sdp: answer.sdp },
                     hangup: false
                 };
-                console.log("Updating Firestore with answer:", cWithAnswer);
                 await cref.update(cWithAnswer)
                     .then(() => console.log("Answer successfully updated"))
                     .catch(error => console.error("Failed to update answer:", error));
@@ -302,15 +291,9 @@ export default function CallScreen({ navigation }: CallScreenProps) {
 
     //call end function
     const hangup = async () => {
-        console.log("Initiating hangup process");
         setGettingCall(false);
         connecting.current = false;
         setIsAudioCall(false);
-
-        if (ringtone && ringtone.isPlaying()) {
-            ringtone.stop(() => console.log('Ringtone stopped on hangup'));
-        }
-
         const callId = myId && targetId ? `${myId}_${targetId}` : "chatId";
         const incomingCallId = myId && targetId ? `${targetId}_${myId}` : "chatId";
         const cref = firestore().collection("meet").doc(callId);
@@ -345,13 +328,11 @@ export default function CallScreen({ navigation }: CallScreenProps) {
             cref.set({ hangup: true }, { merge: true }).catch(error => console.error("Failed to set hangup (outgoing):", error)),
             incomingCref.set({ hangup: true }, { merge: true }).catch(error => console.error("Failed to set hangup (incoming):", error))
         ]);
-        console.log("Hangup signal set for both sides:", callId, incomingCallId);
 
         await streamCleanup();
         if (pc.current) {
             pc.current.close();
             pc.current = new RTCPeerConnection(configuration);
-            console.log("Peer connection closed and reset");
         }
 
         await Promise.all([
@@ -367,7 +348,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
             if (mediaStream) {
                 mediaStream.getTracks().forEach(track => {
                     track.stop();
-                    console.log(`Stopped track: ${track.kind} - ${track.id}`);
                 });
             }
         };
@@ -400,7 +380,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                 cref.delete()
             ];
             await Promise.all(deletePromises);
-            console.log("Firestore cleanup completed for:", callId);
         } catch (error) {
             console.error("Firestore cleanup error:", error);
         }
@@ -482,7 +461,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
         if (pc.current) {
             (pc.current as any).onicecandidate = (event: any) => {
                 if (event.candidate) {
-                    console.log("Adding ICE candidate for", localName, event.candidate);
                     candidateCollection.add(event.candidate)
                         .catch(error => console.error("Failed to add ICE candidate:", error));
                 }
@@ -493,7 +471,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                 snapshot.docChanges().forEach((change: any) => {
                     if (change.type === "added") {
                         const candidate = new RTCIceCandidate(change.doc.data());
-                        console.log("Received ICE candidate from", remoteName, candidate);
                         if (pc.current && pc.current.remoteDescription) {
                             pc.current.addIceCandidate(candidate)
                                 .catch(error => console.error("Failed to apply ICE candidate:", error));
