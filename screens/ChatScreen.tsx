@@ -2,8 +2,7 @@ import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firest
 import { RouteProp, useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from '@react-navigation/stack';
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Button, FlatList, KeyboardAvoidingView, NativeScrollEvent, NativeSyntheticEvent, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import inCallManager from 'react-native-incall-manager';
+import { Alert, AppState, AppStateStatus, FlatList, KeyboardAvoidingView, NativeScrollEvent, NativeSyntheticEvent, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import Icon from 'react-native-vector-icons/FontAwesome5';
 import { MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription } from 'react-native-webrtc';
 import { RootStackParamList } from "../App";
@@ -26,9 +25,8 @@ interface ChatScreenProps {
 
 const configuration = {
     "iceServers": [
-        { "url": "stun:stun.1.google.com:19302" },
-        { "url": "stun:stun1.1.google.com:19302" },
-        { "url": "stun:stun.l.google.com:19302" }
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
     ]
 };
 
@@ -65,7 +63,22 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
 
     const flatListRef = useRef<FlatList<any> | null>(null);
 
+    const cleanupTimeout = useRef<NodeJS.Timeout | null>(null);
+
     useEffect(() => {
+
+        const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+            if (nextAppState === 'background' || nextAppState === 'inactive') {
+                const callId = `${myId}_${targetId}`;
+                const incomingCallId = `${targetId}_${myId}`;
+                await Promise.all([
+                    firestore().collection('meet').doc(callId).set({ hangup: true }, { merge: true }),
+                    firestore().collection('meet').doc(incomingCallId).set({ hangup: true }, { merge: true }),
+                ]).catch(error => console.error('Failed to signal hangup:', error));
+                await hangup(); // Ensure local cleanup
+            }
+        };
+        const subscription = AppState.addEventListener('change', handleAppStateChange);
 
         //new code for audio and video call
         if (!myId || !targetId) return;
@@ -85,8 +98,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         });
 
         const subscribeOutgoing = outgoingCref.onSnapshot(snapshot => {
-            const data = snapshot.data();
-            if (snapshot.exists && data?.hangup) {
+            if (snapshot.exists && snapshot.data()?.hangup) {
                 hangup();
             }
         });
@@ -98,29 +110,6 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                 }
             });
         });
-        //start the ringtone
-        // inCallManager.start({ media: "audio" })
-        // console.log('InCallManager initialized');
-
-        const fetchInitialMessages = async () => {
-            const snapshot = await firestore()
-                .collection('meet')
-                .doc(chatRoomId)
-                .collection('messages')
-                .orderBy('timestamp', 'asc')
-                .get();
-            const initialMessages = snapshot.docs.map(doc => {
-                const data = doc.data();
-                return {
-                    id: doc.id,
-                    text: data.text,
-                    senderId: data.senderId,
-                    timestamp: data.timestamp || null,
-                };
-            });
-            setMessages(initialMessages);
-        }
-        fetchInitialMessages();
 
         const subscriber = firestore()
             .collection('meet')
@@ -143,12 +132,30 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                     flatListRef.current?.scrollToEnd({ animated: false });
                 }
             });
-        return () => {
-            subscriber();
 
-            //new code
-            // inCallManager.stop();
-            // console.log('InCallManager stopped');
+        const fetchInitialMessages = async () => {
+            const snapshot = await firestore()
+                .collection('meet')
+                .doc(chatRoomId)
+                .collection('messages')
+                .orderBy('timestamp', 'asc')
+                .get();
+            const initialMessages = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    text: data.text,
+                    senderId: data.senderId,
+                    timestamp: data.timestamp || null,
+                };
+            });
+            setMessages(initialMessages);
+        }
+        fetchInitialMessages();
+
+        return () => {
+            subscription.remove();
+            subscriber();
             subscribe();
             subscribeOutgoing();
             subscrbeDelete();
@@ -161,14 +168,10 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
             pc.current.close();
             pc.current = new RTCPeerConnection(configuration);
         }
-        if (localStream || remoteStream || stream) {
-            await streamCleanup();
-        }
+        await streamCleanup();
 
         stream = audioOnly ? await Utils.getAudioStream() : await Utils.getStream();
-        if (!stream) {
-            throw new Error("Failed to get stream");
-        }
+        if (!stream) throw new Error("Failed to get stream");
         setLocalStream(stream);
         stream.getTracks().forEach(track => {
             pc.current?.addTrack(track, stream!);
@@ -350,10 +353,8 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         setGettingCall(false);
         connecting.current = false;
         setIsAudioCall(false);
-        const callId = myId && targetId ? `${myId}_${targetId}` : "chatId";
-        const incomingCallId = myId && targetId ? `${targetId}_${myId}` : "chatId";
-        const cref = firestore().collection("meet").doc(callId);
-        const incomingCref = firestore().collection("meet").doc(incomingCallId);
+        const callId = `${myId}_${targetId}`;
+        const incomingCallId = `${targetId}_${myId}`;
 
         if (callStartTime.current && myId && isEnabled) {
             const endTime = Date.now();
@@ -380,22 +381,25 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         }
 
         // Set hangup signal and clean up synchronously
+        // Signal hangup only once
         await Promise.all([
-            cref.set({ hangup: true }, { merge: true }).catch(error => console.error("Failed to set hangup (outgoing):", error)),
-            incomingCref.set({ hangup: true }, { merge: true }).catch(error => console.error("Failed to set hangup (incoming):", error))
-        ]);
+            firestore().collection('meet').doc(callId).set({ hangup: true }, { merge: true }),
+            firestore().collection('meet').doc(incomingCallId).set({ hangup: true }, { merge: true }),
+        ]).catch(error => console.error('Failed to set hangup:', error));
 
         await streamCleanup();
         if (pc.current) {
             pc.current.close();
             pc.current = new RTCPeerConnection(configuration);
         }
-
-        await Promise.all([
-            firestoreCleanup(callId),
-            firestoreCleanup(incomingCallId)
-        ]).then(() => console.log("Firestore cleanup completed"))
-            .catch(error => console.error("Firestore cleanup failed:", error));
+        if (cleanupTimeout.current)
+            clearTimeout(cleanupTimeout.current);
+        cleanupTimeout.current = setTimeout(async () => {
+            await Promise.all([
+                firestoreCleanup(callId),
+                firestoreCleanup(incomingCallId)
+            ])
+        }, 500);
     };
 
     //all stream cleanup functions
@@ -424,22 +428,19 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
     //Firestore data clear or delete function
     const firestoreCleanup = async (callId: string) => {
         const cref = firestore().collection("meet").doc(callId);
-
         try {
             const [callerCandidates, calleeCandidates] = await Promise.all([
                 cref.collection(myId || "caller").get(),
                 cref.collection(targetId || "callee").get()
             ]);
-            const deletePromises = [
-                ...callerCandidates.docs.map(candidate => candidate.ref.delete()),
-                ...calleeCandidates.docs.map(candidate => candidate.ref.delete()),
-                cref.delete()
-            ];
+            const deletePromises = [];
+            callerCandidates.docs.map(doc => deletePromises.push(doc.ref.delete()));
+            calleeCandidates.docs.map(doc => deletePromises.push(doc.ref.delete()));
+            deletePromises.push(cref.delete());
             await Promise.all(deletePromises);
         } catch (error) {
             console.error("Firestore cleanup error:", error);
         }
-
     }
 
     //helper function
@@ -563,13 +564,13 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                         onPress={create}
 
                         iconName="video-camera"
-                        backgroundColor="grey"
+                        backgroundColor="#007AFF"
                         style={{ justifyContent: 'flex-end' }}
                     />
                     <CustomButton
                         onPress={audioCall}
                         iconName="phone"
-                        backgroundColor="grey"
+                        backgroundColor="#007AFF"
                         style={{ marginTop: 0, marginLeft: 10, justifyContent: 'flex-end' }}
                     />
                 </View>
@@ -594,7 +595,9 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                     placeholderTextColor="#000"
                     multiline
                     onChangeText={setMessage} />
-                <Button title="Send" onPress={sendMessage} color="#007AFF" />
+                <TouchableOpacity onPress={sendMessage} style={styles.sendButton}>
+                    <Icon name="paper-plane" size={20} color="#fff" />
+                </TouchableOpacity>
                 {unreadCount > 0 && (
                     <TouchableOpacity style={styles.arrowButton} onPress={scrollToBottom}>
                         <Icon name="arrow-down" size={20} color="#fff" />
@@ -687,10 +690,6 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         marginRight: 10,
     },
-    headerButton: {
-        marginLeft: 15,
-        padding: 5,
-    },
     buttonContainer: {
         flexDirection: 'row',
         justifyContent: 'flex-end',
@@ -710,6 +709,14 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
         marginLeft: 10,
+    },
+    sendButton: {
+        backgroundColor: '#007AFF',
+        height: 45,
+        borderRadius: 100,
+        padding: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
 })
 export default ChatScreen;

@@ -6,19 +6,13 @@ import {
     View
 } from 'react-native';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
 import { NavigationProp } from '@react-navigation/native';
 import { useEffect, useRef, useState } from 'react';
-import { Button, FlatList, Switch, Text, TouchableOpacity } from 'react-native';
-import inCallManager from 'react-native-incall-manager';
-import { MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription } from 'react-native-webrtc';
+import { FlatList, Text, TouchableOpacity } from 'react-native';
+import { MediaStream, RTCIceCandidate, RTCPeerConnection } from 'react-native-webrtc';
 import { RootStackParamList } from '../App';
-import AudioCallScreen from '../components/AudioCallScreen';
-import CustomButton from '../components/Button';
-import CustomButtonNew from '../components/CustomButton';
-import GettingCall from '../components/GettingCall';
-import Utils from '../components/Utils';
-import Video from '../components/Video';
 
 const configuration = {
     "iceServers": [
@@ -30,6 +24,11 @@ const configuration = {
 
 interface CallScreenProps {
     navigation: NavigationProp<RootStackParamList, 'CallScreen'>;
+}
+
+interface User {
+    id: string;
+    timestamp: any;
 }
 
 export default function CallScreen({ navigation }: CallScreenProps) {
@@ -53,6 +52,24 @@ export default function CallScreen({ navigation }: CallScreenProps) {
     //switch
     const [isEnabled, setIsEnabled] = useState(false);
     const toggleSwitch = () => setIsEnabled(previousState => !previousState);
+
+    //save id 
+    const [users, setUsers] = useState<User[]>([]);
+    const [showInput, setShowInput] = useState(false);
+
+    useEffect(() => {
+        const loadId = async () => {
+            const savedId = await AsyncStorage.getItem('myId');
+            if (savedId) {
+                setMyId(savedId);
+                setShowInput(false);
+                fetchUsers(savedId); // Fetch users immediately if ID exists
+            } else {
+                setShowInput(true);
+            }
+        };
+        loadId();
+    }, []);
 
     useEffect(() => {
         if (!myId || !targetId) return;
@@ -86,208 +103,26 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                 }
             });
         });
-
-        //start the ringtone
-        inCallManager.start({ media: "audio" })
-        console.log('InCallManager initialized');
-
         return () => {
-            inCallManager.stop();
-            console.log('InCallManager stopped');
             subscribe();
             subscribeOutgoing();
             subscrbeDelete();
         };
     }, [myId, targetId]);
 
-    //set up a webrtc connection between the peer connections
-    const setupWebrtc = async (audioOnly = false) => {
-        if (pc.current) {
-            pc.current.close();
-            pc.current = new RTCPeerConnection(configuration);
-        }
-        if (localStream || remoteStream || stream) {
-            await streamCleanup();
-        }
-
-        stream = audioOnly ? await Utils.getAudioStream() : await Utils.getStream();
-        if (!stream) {
-            throw new Error("Failed to get stream");
-        }
-        setLocalStream(stream);
-        stream.getTracks().forEach(track => {
-            pc.current?.addTrack(track, stream!);
-        });
-
-        (pc.current as any).ontrack = (event: any) => {
-            setRemoteStream(event.streams[0]);
-        };
+    //fetch users
+    const fetchUsers = (currentId: string) => {
+        if (!currentId || currentId.length !== 5 || !/^\d+$/.test(currentId)) return;
+        firestore()
+            .collection('users') // Changed from 'meet' to 'users' for clarity
+            .onSnapshot(snapshot => {
+                const userList = snapshot.docs
+                    .map(doc => ({ id: doc.data().id, timestamp: doc.data().timestamp }))
+                    .filter(user => user.id !== currentId); // Exclude current user
+                setUsers(userList);
+            });
     };
 
-    //video call only 
-    const create = async () => {
-        if (myId.length !== 5 || targetId.length !== 5 || !/^\d+$/.test(myId) || !/^\d+$/.test(targetId)) {
-            Alert.alert('Error', 'Both IDs must be 5-digit numbers');
-            return;
-        }
-
-        connecting.current = true;
-        setIsAudioCall(false);
-        try {
-            await setupWebrtc();
-            callStartTime.current = Date.now();
-            const callId = `${myId}_${targetId}`;
-            const cref = firestore().collection("meet").doc(callId);
-
-            // Ensure previous call is fully cleaned up
-            await cref.delete().catch(() => console.log("No previous call doc to delete"));
-            await cref.set({ hangup: false }, { merge: true });
-
-            const startRemoteCandidates = await collectIceCandidates(cref, myId, targetId);
-            if (pc.current) {
-                const offer = await pc.current.createOffer({});
-                await pc.current.setLocalDescription(offer);
-                const cWithOffer = {
-                    offer: { type: offer.type, sdp: offer.sdp },
-                    callType: "video",
-                    callerId: myId,
-                    targetId: targetId,
-                    hangup: false
-                };
-                await cref.set(cWithOffer)
-                    .then(() => console.log("Offer successfully written to Firestore"))
-                    .catch(error => { throw new Error("Failed to write offer: " + error.message); });
-
-                const doc = await cref.get();
-                if (!doc.data()?.offer) {
-                    throw new Error("Offer verification failed");
-                }
-
-                const unsubscribe = cref.onSnapshot(snapshot => {
-                    const data = snapshot.data();
-                    if (data && data.answer && !pc.current.remoteDescription) {
-                        pc.current.setRemoteDescription(new RTCSessionDescription(data.answer))
-                            .then(() => {
-
-                                startRemoteCandidates();
-
-                            });
-                        unsubscribe();
-                    }
-                });
-            }
-        } catch (error) {
-            console.error("Error in create:", error.message || error);
-            await hangup();
-            Alert.alert("Error", "Failed to start video call: " + error.message);
-        }
-    };
-
-    //for audio call only
-    const audioCall = async () => {
-        if (myId.length !== 5 || targetId.length !== 5 || !/^\d+$/.test(myId) || !/^\d+$/.test(targetId)) {
-            Alert.alert('Error', 'Both IDs must be 5-digit numbers');
-            return;
-        }
-
-        connecting.current = true;
-        setIsAudioCall(true);
-        try {
-            await setupWebrtc(true);
-            callStartTime.current = Date.now();
-            const callId = `${myId}_${targetId}`;
-            const cref = firestore().collection("meet").doc(callId);
-
-            // Ensure previous call is fully cleaned up
-            await cref.delete().catch(() => console.log("No previous call doc to delete"));
-            await cref.set({ hangup: false }, { merge: true });
-
-            const startRemoteCandidates = await collectIceCandidates(cref, myId, targetId);
-            if (pc.current) {
-                const offer = await pc.current.createOffer({});
-                await pc.current.setLocalDescription(offer);
-                const cWithOffer = {
-                    offer: { type: offer.type, sdp: offer.sdp },
-                    callType: "audio",
-                    callerId: myId,
-                    targetId: targetId,
-                    hangup: false
-                };
-                await cref.set(cWithOffer)
-                    .then(() => console.log("Offer successfully written to Firestore"))
-                    .catch(error => { throw new Error("Failed to write offer: " + error.message); });
-
-                const doc = await cref.get();
-                if (!doc.data()?.offer) {
-                    throw new Error("Offer verification failed");
-                }
-
-                const unsubscribe = cref.onSnapshot(snapshot => {
-                    const data = snapshot.data();
-                    if (data && data.answer && !pc.current.remoteDescription) {
-                        pc.current.setRemoteDescription(new RTCSessionDescription(data.answer))
-                            .then(() => {
-                                startRemoteCandidates();
-                            });
-                        unsubscribe();
-                    }
-                });
-            }
-        } catch (error) {
-            // console.error("Error in audioCall:", error.message || error);
-            await hangup();
-            // Alert.alert("Error", "Failed to start audio call: " + error.message);
-        }
-    };
-
-    //call join or accept function
-    const join = async () => {
-        connecting.current = true;
-        setGettingCall(false);
-        const callId = `${targetId}_${myId}`;
-        const cref = firestore().collection("meet").doc(callId);
-
-        // Retry logic to wait for offer
-        const waitForOffer = async (maxRetries = 5, delayMs = 1000): Promise<any> => {
-            for (let i = 0; i < maxRetries; i++) {
-                const doc = await cref.get();
-                const offer = doc.data()?.offer;
-                if (offer) {
-                    return { offer, callType: doc.data()?.callType || "video" };
-                }
-                await new Promise(resolve => setTimeout(resolve, delayMs));
-            }
-            throw new Error("Offer not found after retries");
-        };
-
-        try {
-            const { offer, callType } = await waitForOffer();
-            const isAudioOnly = callType === "audio";
-            setIsAudioCall(isAudioOnly);
-            await setupWebrtc(isAudioOnly);
-            callStartTime.current = Date.now();
-            const startRemoteCandidates = await collectIceCandidates(cref, myId, targetId);
-
-            if (pc.current) {
-                await pc.current.setRemoteDescription(new RTCSessionDescription(offer));
-                startRemoteCandidates();
-                const answer = await pc.current.createAnswer();
-                await pc.current.setLocalDescription(answer);
-                const cWithAnswer = {
-                    answer: { type: answer.type, sdp: answer.sdp },
-                    hangup: false
-                };
-                await cref.update(cWithAnswer)
-                    .then(() => console.log("Answer successfully updated"))
-                    .catch(error => console.error("Failed to update answer:", error));
-            }
-        } catch (error) {
-            console.error("Error in join:", error || error);
-            connecting.current = false;
-            await hangup();
-            Alert.alert("Error", "Failed to join call: Offer not found");
-        }
-    };
 
     //call end function
     const hangup = async () => {
@@ -392,15 +227,28 @@ export default function CallScreen({ navigation }: CallScreenProps) {
             return;
         }
         try {
-            await firestore().collection('meet').doc(`user_${myId}`).set({
+            await firestore().collection('users').doc(`user_${myId}`).set({
                 id: myId,
                 timestamp: firestore.FieldValue.serverTimestamp(),
             });
+            await AsyncStorage.setItem('myId', myId);
+            setShowInput(false);
+            fetchUsers(myId);
             Alert.alert('Success', `ID ${myId} saved`);
         } catch (error) {
             Alert.alert('Error', 'Failed to save ID: ' + error);
         }
     };
+
+    //render users list
+    const renderUser = ({ item }: { item: User }) => (
+        <TouchableOpacity
+            style={styles.userItem}
+            onPress={() => navigation.navigate('Chat', { myId, targetId: item.id })}
+        >
+            <Text style={styles.userText}>{item.id}</Text>
+        </TouchableOpacity>
+    );
 
     // fetch history button
     const fetchCallHistory = async () => {
@@ -444,13 +292,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
         }
     };
 
-    const startChat = () => {
-        if (!myId || !targetId) {
-            Alert.alert('Error', 'Please enter both your ID and target ID');
-            return;
-        }
-        navigation.navigate('Chat', { myId, targetId });
-    }
     //helper function
     const collectIceCandidates = async (
         cref: FirebaseFirestoreTypes.DocumentReference<FirebaseFirestoreTypes.DocumentData>,
@@ -484,99 +325,41 @@ export default function CallScreen({ navigation }: CallScreenProps) {
         }
 
     };
-    //Display the gettingcall component
-    if (gettingCall) {
-        return <GettingCall hangup={hangup} join={join} />;
-    }
-
-    if (localStream) {
-        return isAudioCall ? (
-            <AudioCallScreen hangup={hangup} localStream={localStream} remoteStream={remoteStream} />
-        ) : (
-            <Video hangup={hangup} localStream={localStream} remoteStream={remoteStream} />
-        );
-    }
 
     //displays the call button 
     return (
-        <View style={styles.sectionContainer}>
-            <View style={styles.buttonContainer}>
-                <Text style={[{ color: '#000', width: "auto", textAlign: 'center' }]}>
-                    Save Call Logs/History
-                </Text>
-                <Switch
-                    style={[{ marginLeft: 30, marginBottom: 10, alignItems: 'center' }]}
-                    trackColor={{ false: '#767577', true: '#81b0ff' }}
-                    thumbColor={isEnabled ? '#f5dd4b' : '#f4f3f4'}
-                    ios_backgroundColor="#3e3e3e"
-                    onValueChange={toggleSwitch}
-                    value={isEnabled}
-                />
-            </View>
-
-            <TextInput
-                style={styles.input}
-                value={myId}
-                onChangeText={setMyId}
-                placeholder="Enter your 5-digit ID"
-                placeholderTextColor="#000"
-                keyboardType="numeric"
-                maxLength={5}
-            />
-            <TouchableOpacity onPress={saveId}>
-                <Text style={[styles.input, { backgroundColor: "blue", color: '#fff', width: 90, textAlign: 'center' }]}>
-                    Save Id
-                </Text>
-            </TouchableOpacity>
-            <TextInput
-                style={styles.input}
-                value={targetId}
-                placeholderTextColor="#000"
-                onChangeText={setTargetId}
-                placeholder="Enter target 5-digit ID"
-                keyboardType="numeric"
-                maxLength={5}
-            />
-            <View style={styles.buttonContainer}>
-                <CustomButton iconName='video-camera' onPress={create} backgroundColor='grey' />
-                <CustomButton iconName='phone' onPress={audioCall} backgroundColor='grey' style={{ marginTop: 0, marginLeft: 20 }} />
-                <CustomButtonNew text='Show History' onPress={fetchCallHistory} style={[{
-                    backgroundColor: "blue",
-                    color: '#fff',
-                    width: "auto",
-                    textAlign: 'center',
-                    marginLeft: 30,
-                    marginTop: 10,
-                }]} />
-            </View>
-            <CustomButtonNew text='Start Chat' onPress={startChat} style={[{
-                backgroundColor: "blue",
-                color: '#fff',
-                width: "auto",
-                textAlign: 'center',
-                marginLeft: 30,
-                marginTop: 10,
-            }]} />
-            {/* show flatlist */}
-            {showHistory && (
-                <View style={styles.historyContainer}>
-                    <FlatList
-                        data={callHistory}
-                        keyExtractor={item => item.id}
-                        renderItem={({ item }) => (
-                            <View style={styles.historyItem}>
-                                <Text>User ID: {item.otherUserId}</Text>
-                                <Text>Start Time: {item.startTime}</Text>
-                                <Text>Duration: {item.duration}</Text>
-                                <Text>Type: {item.callType}</Text>
-                            </View>
-                        )}
-                        ListEmptyComponent={<Text>No call history available</Text>}
+        //new code
+        <View style={styles.container}>
+            {showInput ? (
+                <View style={styles.inputContainer}>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="Enter your 5-digit ID"
+                        value={myId}
+                        onChangeText={setMyId}
+                        keyboardType="numeric"
+                        maxLength={5}
                     />
-                    <Button title="Hide History" onPress={() => setShowHistory(false)} />
+                    <TouchableOpacity style={styles.saveButton} onPress={saveId}>
+                        <Text style={styles.buttonText}>Save ID</Text>
+                    </TouchableOpacity>
                 </View>
-            )}
+            )
+                : users.length === 0 ? (
+                    <View style={styles.noUsersContainer}>
+                        <Text style={styles.noUsersText}>No users are found</Text>
+                    </View>
+                )
+                    : (
+                        <FlatList
+                            data={users}
+                            renderItem={renderUser}
+                            keyExtractor={item => item.id}
+                            ListHeaderComponent={<Text style={styles.header}>Users List</Text>}
+                        />
+                    )}
         </View>
+
     );
 }
 const styles = StyleSheet.create({
@@ -619,4 +402,13 @@ const styles = StyleSheet.create({
         marginVertical: 5,
         backgroundColor: '#f9f9f9',
     },
+    userItem: { padding: 15, borderBottomWidth: 1, borderBottomColor: '#ccc' },
+    userText: { fontSize: 16 },
+    container: { flex: 1, padding: 10, backgroundColor: '#fff' },
+    inputContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    saveButton: { backgroundColor: '#007AFF', padding: 10, borderRadius: 5 },
+    buttonText: { color: '#fff', fontSize: 16 },
+    header: { fontSize: 20, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' },
+    noUsersContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    noUsersText: { fontSize: 18, color: '#666' },
 }); 
