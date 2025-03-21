@@ -6,21 +6,6 @@ import { useNavigation } from '@react-navigation/native';
 const SplashScreen = () => {
     const navigation = useNavigation();
 
-    const checkPermissions = async () => {
-        const status = await checkPermissions(PERMISSIONS.ANDROID.READ_EXTERNAL_STORAGE);
-        if (status !== RESULTS.GRANTED) {
-            const requestStatus = await request(PERMISSIONS.ANDROID.READ_EXTERNAL_STORAGE);
-            if (requestStatus !== RESULTS.GRANTED) {
-                Alert.alert(
-                    'Permission Required',
-                    'Storage permission is needed to proceed.',
-                    [{ text: 'Grant Permission', onPress: () => checkPermissions() }],
-                    { cancelable: false }
-                );
-            }
-        }
-    };
-
     const handleStart = () => {
         // Navigate to Dashboard
         navigation.navigate('CallScreen');

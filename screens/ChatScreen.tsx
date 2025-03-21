@@ -12,6 +12,7 @@ import CustomButton from '../components/Button';
 import GettingCall from '../components/GettingCall';
 import Utils from '../components/Utils';
 import Video from '../components/Video';
+import { ActivityIndicator } from 'react-native';
 
 interface ChatMessage {
     id: string;
@@ -70,6 +71,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
     //ringne code
     const ringtoneRef = useRef<Sound | null>(null);
     const ringingToneRef = useRef<Sound | null>(null);
+    const [isCleaningUp, setIsCleaningUp] = useState(false);
 
     useEffect(() => {
         Sound.setCategory('Playback', true);
@@ -468,12 +470,13 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         if (ringingToneRef.current) ringingToneRef.current.stop();
         if (cleanupTimeout.current)
             clearTimeout(cleanupTimeout.current);
-        cleanupTimeout.current = setTimeout(async () => {
-            await Promise.all([
-                firestoreCleanup(callId),
-                firestoreCleanup(incomingCallId)
-            ])
-        }, 500);
+        // cleanupTimeout.current = setTimeout(async () => {
+        //     await Promise.all([
+        //         // firestoreCleanup(callId),
+        //         // firestoreCleanup(incomingCallId)
+        //     ])
+        // }, 500);
+        await cleanupFirestore();
     };
 
     //all stream cleanup functions
@@ -501,6 +504,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
     };
     //Firestore data clear or delete function
     const firestoreCleanup = async (callId: string) => {
+        setIsCleaningUp(true);
         const cref = firestore().collection("meet").doc(callId);
         try {
             const [callerCandidates, calleeCandidates] = await Promise.all([
@@ -516,6 +520,42 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
             console.error("Firestore cleanup error:", error);
         }
     }
+
+    const cleanupFirestore = async () => {
+        setIsCleaningUp(true);
+        const callId = `${myId}_${targetId}`; // Outgoing call
+        const incomingCallId = `${targetId}_${myId}`; // Incoming call
+        const cref = firestore().collection('meet').doc(callId);
+        const incomingCref = firestore().collection('meet').doc(incomingCallId);
+
+        try {
+            // Delete ICE candidates subcollections
+            const deleteCandidates = async (docRef: any, collectionName: string) => {
+                const candidates = await docRef.collection(collectionName).get();
+                const batch = firestore().batch();
+                candidates.docs.forEach((doc: { ref: FirebaseFirestoreTypes.DocumentReference<FirebaseFirestoreTypes.DocumentData>; }) => batch.delete(doc.ref));
+                await batch.commit();
+            };
+
+            // Clean up both directions
+            await Promise.all([
+                deleteCandidates(cref, myId),
+                deleteCandidates(cref, targetId),
+                deleteCandidates(incomingCref, myId),
+                deleteCandidates(incomingCref, targetId),
+            ]);
+
+            // Delete main call documents
+            await Promise.all([
+                cref.delete(),
+                incomingCref.delete(),
+            ]);
+        } catch (error) {
+            console.error('Cleanup error:', error);
+        } finally {
+            setIsCleaningUp(false);
+        }
+    };
 
     //helper function
     const collectIceCandidates = async (
@@ -623,6 +663,15 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         );
     }
 
+    if (isCleaningUp) {
+        return (
+            <View style={styles.loadingContainer}>
+                 <ActivityIndicator size="large" color="#007AFF" />
+                 <Text style={styles.loadingText}>Please wait...</Text>
+            </View>
+        );
+    }
+
     return (
         <KeyboardAvoidingView
             style={styles.container}
@@ -661,6 +710,8 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                 scrollEventThrottle={16}
                 contentContainerStyle={{ paddingVertical: 10 }}
             />
+
+
             <View style={styles.inputContainer}>
                 <TextInput
                     style={styles.textInput}
@@ -682,6 +733,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                                 </View>
                             )
                         }
+
                     </TouchableOpacity>
                 )}
 
@@ -796,6 +848,17 @@ const styles = StyleSheet.create({
         padding: 12,
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#FAFAFA',
+    },
+    loadingText: {
+        fontSize: 18,
+        color: '#00796B',
+        fontWeight: 'bold',
     },
 })
 export default ChatScreen;
