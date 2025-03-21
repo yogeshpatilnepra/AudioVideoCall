@@ -3,6 +3,7 @@ import { RouteProp, useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from '@react-navigation/stack';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, AppState, AppStateStatus, FlatList, KeyboardAvoidingView, NativeScrollEvent, NativeSyntheticEvent, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import Sound from 'react-native-sound';
 import Icon from 'react-native-vector-icons/FontAwesome5';
 import { MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription } from 'react-native-webrtc';
 import { RootStackParamList } from "../App";
@@ -11,6 +12,7 @@ import CustomButton from '../components/Button';
 import GettingCall from '../components/GettingCall';
 import Utils from '../components/Utils';
 import Video from '../components/Video';
+
 interface ChatMessage {
     id: string;
     text: string;
@@ -65,8 +67,47 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
 
     const cleanupTimeout = useRef<NodeJS.Timeout | null>(null);
 
-    useEffect(() => {
+    //ringne code
+    const ringtoneRef = useRef<Sound | null>(null);
+    const ringingToneRef = useRef<Sound | null>(null);
 
+    useEffect(() => {
+        Sound.setCategory('Playback', true);
+        const ringingTone = new Sound('ringtone.mp3', Sound.MAIN_BUNDLE, (error) => {
+            if (error) {
+                console.error('Failed to load ringing tone:', error);
+                return;
+            }
+            ringingTone.setVolume(0.5); // Adjust volume as needed
+            ringingToneRef.current = ringingTone;
+        });
+
+        return () => {
+            if (ringingToneRef.current) {
+                ringingToneRef.current.stop(() => ringingToneRef.current!.release());
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        Sound.setCategory('Playback', true); // iOS category for playback
+        const ringtone = new Sound('ringtone.mp3', Sound.MAIN_BUNDLE, (error) => {
+            if (error) {
+                console.error('Failed to load ringtone:', error);
+                return;
+            }
+            ringtone.setVolume(1.0); // Full volume
+            ringtoneRef.current = ringtone;
+        });
+
+        return () => {
+            if (ringtoneRef.current) {
+                ringtoneRef.current.stop(() => ringtoneRef.current!.release());
+            }
+        };
+    }, []);
+
+    useEffect(() => {
         const handleAppStateChange = async (nextAppState: AppStateStatus) => {
             if (nextAppState === 'background' || nextAppState === 'inactive') {
                 const callId = `${myId}_${targetId}`;
@@ -91,6 +132,13 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
             const data = snapshot.data();
             if (data && data.offer && data.targetId === myId && !connecting.current) {
                 setGettingCall(true);
+
+                if (ringtoneRef.current) {
+                    ringtoneRef.current.setNumberOfLoops(-1); // Loop indefinitely
+                    ringtoneRef.current.play((success) => {
+                        if (!success) console.error('Ringtone playback failed');
+                    });
+                }
             }
             if (snapshot.exists && data?.hangup) {
                 hangup();
@@ -128,30 +176,10 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                 });
                 setMessages(chatMessages);
                 // If at bottom, scroll to end automatically
-                if (isAtBottom && chatMessages.length > 0) {
-                    flatListRef.current?.scrollToEnd({ animated: false });
-                }
+                // if (isAtBottom && chatMessages.length > 0) {
+                //     flatListRef.current?.scrollToEnd({ animated: false });
+                // }
             });
-
-        const fetchInitialMessages = async () => {
-            const snapshot = await firestore()
-                .collection('meet')
-                .doc(chatRoomId)
-                .collection('messages')
-                .orderBy('timestamp', 'asc')
-                .get();
-            const initialMessages = snapshot.docs.map(doc => {
-                const data = doc.data();
-                return {
-                    id: doc.id,
-                    text: data.text,
-                    senderId: data.senderId,
-                    timestamp: data.timestamp || null,
-                };
-            });
-            setMessages(initialMessages);
-        }
-        fetchInitialMessages();
 
         return () => {
             subscription.remove();
@@ -159,6 +187,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
             subscribe();
             subscribeOutgoing();
             subscrbeDelete();
+            if (ringtoneRef.current) ringtoneRef.current.stop();
         };
     }, [chatRoomId, isAtBottom, myId, targetId]);
 
@@ -182,7 +211,6 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         };
     };
 
-
     //video call only 
     const create = async () => {
         if (myId.length !== 5 || targetId.length !== 5 || !/^\d+$/.test(myId) || !/^\d+$/.test(targetId)) {
@@ -193,48 +221,63 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         connecting.current = true;
         setIsAudioCall(false);
         try {
-            await setupWebrtc();
+            if (pc.current) {
+                pc.current.close();
+                pc.current = new RTCPeerConnection(configuration);
+            }
+            await streamCleanup();
+            const stream = await Utils.getStream();
+            if (!stream) throw new Error('Failed to get stream');
+            setLocalStream(stream);
+            stream.getTracks().forEach(track => pc.current.addTrack(track, stream));
+            (pc.current as any).ontrack = (event: any) => setRemoteStream(event.streams[0]);
             callStartTime.current = Date.now();
             const callId = `${myId}_${targetId}`;
             const cref = firestore().collection("meet").doc(callId);
 
+            if (ringingToneRef.current) {
+                ringingToneRef.current.setNumberOfLoops(-1);
+                ringingToneRef.current.play((success) => {
+                    if (!success) console.error('Ringing tone playback failed');
+                });
+            }
+
+
             // Ensure previous call is fully cleaned up
-            await cref.delete().catch(() => console.log("No previous call doc to delete"));
+            await cref.delete().catch(() => { });
             await cref.set({ hangup: false }, { merge: true });
 
             const startRemoteCandidates = await collectIceCandidates(cref, myId, targetId);
-            if (pc.current) {
-                const offer = await pc.current.createOffer({});
-                await pc.current.setLocalDescription(offer);
-                const cWithOffer = {
-                    offer: { type: offer.type, sdp: offer.sdp },
-                    callType: "video",
-                    callerId: myId,
-                    targetId: targetId,
-                    hangup: false
-                };
-                await cref.set(cWithOffer)
-                    .then(() => console.log("Offer successfully written to Firestore"))
-                    .catch(error => { throw new Error("Failed to write offer: " + error.message); });
-
-                const doc = await cref.get();
-                if (!doc.data()?.offer) {
-                    throw new Error("Offer verification failed");
-                }
-
-                const unsubscribe = cref.onSnapshot(snapshot => {
-                    const data = snapshot.data();
-                    if (data && data.answer && !pc.current.remoteDescription) {
-                        pc.current.setRemoteDescription(new RTCSessionDescription(data.answer))
-                            .then(() => {
-
-                                startRemoteCandidates();
-
-                            });
-                        unsubscribe();
-                    }
-                });
+            const offer = await pc.current.createOffer({});
+            await pc.current.setLocalDescription(offer);
+            await cref.set({
+                offer: { type: offer.type, sdp: offer.sdp },
+                callType: 'video',
+                callerId: myId,
+                targetId,
+                hangup: false,
+            });
+            const doc = await cref.get();
+            if (!doc.data()?.offer) {
+                throw new Error("Offer verification failed");
             }
+
+            const unsubscribe = cref.onSnapshot(snapshot => {
+                const data = snapshot.data();
+                if (data?.answer && !pc.current.remoteDescription) {
+                    pc.current.setRemoteDescription(new RTCSessionDescription(data.answer))
+                        .then(() => {
+                            startRemoteCandidates();
+                            if (ringingToneRef.current) ringingToneRef.current.stop();
+                        });
+                    unsubscribe();
+                }
+                if (data?.hangup) {
+                    if (ringingToneRef.current) ringingToneRef.current.stop(); // Stop ringing if call ends
+                    hangup();
+                }
+            });
+
         } catch (error) {
             console.error("Error in create:", error.message || error);
             await hangup();
@@ -252,50 +295,68 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         connecting.current = true;
         setIsAudioCall(true);
         try {
-            await setupWebrtc(true);
+            if (pc.current) {
+                pc.current.close();
+                pc.current = new RTCPeerConnection(configuration);
+            }
+            await streamCleanup();
+            const stream = await Utils.getAudioStream();
+            if (!stream) throw new Error('Failed to get stream');
+            setLocalStream(stream);
+            stream.getTracks().forEach(track => pc.current.addTrack(track, stream));
+            (pc.current as any).ontrack = (event: any) => setRemoteStream(event.streams[0]);
+
             callStartTime.current = Date.now();
             const callId = `${myId}_${targetId}`;
             const cref = firestore().collection("meet").doc(callId);
 
             // Ensure previous call is fully cleaned up
-            await cref.delete().catch(() => console.log("No previous call doc to delete"));
+            await cref.delete().catch(() => { });
             await cref.set({ hangup: false }, { merge: true });
 
-            const startRemoteCandidates = await collectIceCandidates(cref, myId, targetId);
-            if (pc.current) {
-                const offer = await pc.current.createOffer({});
-                await pc.current.setLocalDescription(offer);
-                const cWithOffer = {
-                    offer: { type: offer.type, sdp: offer.sdp },
-                    callType: "audio",
-                    callerId: myId,
-                    targetId: targetId,
-                    hangup: false
-                };
-                await cref.set(cWithOffer)
-                    .then(() => console.log("Offer successfully written to Firestore"))
-                    .catch(error => { throw new Error("Failed to write offer: " + error.message); });
-
-                const doc = await cref.get();
-                if (!doc.data()?.offer) {
-                    throw new Error("Offer verification failed");
-                }
-
-                const unsubscribe = cref.onSnapshot(snapshot => {
-                    const data = snapshot.data();
-                    if (data && data.answer && !pc.current.remoteDescription) {
-                        pc.current.setRemoteDescription(new RTCSessionDescription(data.answer))
-                            .then(() => {
-                                startRemoteCandidates();
-                            });
-                        unsubscribe();
-                    }
+            // Start ringing tone on User1's side
+            if (ringingToneRef.current) {
+                ringingToneRef.current.setNumberOfLoops(-1);
+                ringingToneRef.current.play((success) => {
+                    if (!success) console.error('Ringing tone playback failed');
                 });
             }
+
+            const startRemoteCandidates = await collectIceCandidates(cref, myId, targetId);
+            const offer = await pc.current.createOffer({});
+            await pc.current.setLocalDescription(offer);
+            await cref.set({
+                offer: { type: offer.type, sdp: offer.sdp },
+                callType: 'audio',
+                callerId: myId,
+                targetId,
+                hangup: false,
+            });
+            const doc = await cref.get();
+            if (!doc.data()?.offer) {
+                throw new Error("Offer verification failed");
+            }
+
+            const unsubscribe = cref.onSnapshot(snapshot => {
+                const data = snapshot.data();
+                if (data?.answer && !pc.current.remoteDescription) {
+                    pc.current.setRemoteDescription(new RTCSessionDescription(data.answer))
+                        .then(() => {
+                            startRemoteCandidates();
+                            if (ringingToneRef.current) ringingToneRef.current.stop();
+                        });
+                    unsubscribe();
+                }
+                if (data?.hangup) {
+                    if (ringingToneRef.current) ringingToneRef.current.stop(); // Stop ringing if call ends
+                    hangup();
+                }
+            });
+
         } catch (error) {
-            // console.error("Error in audioCall:", error.message || error);
+            console.error("Error in audioCall:", error.message || error);
             await hangup();
-            // Alert.alert("Error", "Failed to start audio call: " + error.message);
+            Alert.alert("Error", "Failed to start audio call: " + error.message);
         }
     };
 
@@ -303,43 +364,54 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
     const join = async () => {
         connecting.current = true;
         setGettingCall(false);
+        if (ringtoneRef.current) ringtoneRef.current.stop();
         const callId = `${targetId}_${myId}`;
         const cref = firestore().collection("meet").doc(callId);
 
         // Retry logic to wait for offer
-        const waitForOffer = async (maxRetries = 5, delayMs = 1000): Promise<any> => {
+        const waitForOffer = async (maxRetries = 10, delayMs = 1000) => {
             for (let i = 0; i < maxRetries; i++) {
                 const doc = await cref.get();
                 const offer = doc.data()?.offer;
-                if (offer) {
-                    return { offer, callType: doc.data()?.callType || "video" };
-                }
+                if (offer) return { offer, callType: doc.data()?.callType || "video" };
                 await new Promise(resolve => setTimeout(resolve, delayMs));
             }
             throw new Error("Offer not found after retries");
         };
 
         try {
+            if (pc.current) {
+                pc.current.close();
+                pc.current = new RTCPeerConnection(configuration);
+            }
+            await streamCleanup();
+
             const { offer, callType } = await waitForOffer();
             const isAudioOnly = callType === "audio";
             setIsAudioCall(isAudioOnly);
-            await setupWebrtc(isAudioOnly);
+
+            const stream = isAudioOnly ? await Utils.getAudioStream() : await Utils.getStream();
+            if (!stream) throw new Error('Failed to get stream');
+            setLocalStream(stream);
+            stream.getTracks().forEach(track => pc.current.addTrack(track, stream));
+            (pc.current as any).ontrack = (event: any) => {
+                setRemoteStream(event.streams[0]);
+            };
+
             callStartTime.current = Date.now();
             const startRemoteCandidates = await collectIceCandidates(cref, myId, targetId);
 
-            if (pc.current) {
-                await pc.current.setRemoteDescription(new RTCSessionDescription(offer));
-                startRemoteCandidates();
-                const answer = await pc.current.createAnswer();
-                await pc.current.setLocalDescription(answer);
-                const cWithAnswer = {
-                    answer: { type: answer.type, sdp: answer.sdp },
-                    hangup: false
-                };
-                await cref.update(cWithAnswer)
-                    .then(() => console.log("Answer successfully updated"))
-                    .catch(error => console.error("Failed to update answer:", error));
-            }
+            await pc.current.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.current.createAnswer();
+            await pc.current.setLocalDescription(answer);
+            const cWithAnswer = {
+                answer: { type: answer.type, sdp: answer.sdp },
+                hangup: false
+            };
+            await cref.update(cWithAnswer)
+                .then(() => { })
+                .catch(error => console.error("Failed to update answer:", error));
+            startRemoteCandidates();
         } catch (error) {
             console.error("Error in join:", error || error);
             connecting.current = false;
@@ -375,7 +447,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                 .doc(myId)
                 .collection("callHistory")
                 .add(historyDoc)
-                .then(() => console.log("Call history saved:", historyDoc))
+                .then(() => { })
                 .catch(error => console.error("Failed to save call history:", error));
             callStartTime.current = null;
         }
@@ -392,6 +464,8 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
             pc.current.close();
             pc.current = new RTCPeerConnection(configuration);
         }
+        if (ringtoneRef.current) ringtoneRef.current.stop();
+        if (ringingToneRef.current) ringingToneRef.current.stop();
         if (cleanupTimeout.current)
             clearTimeout(cleanupTimeout.current);
         cleanupTimeout.current = setTimeout(async () => {
@@ -480,7 +554,9 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
         const isBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 50;
         setIsAtBottom(isBottom);
-        if (isBottom && unreadCount > 0) {
+        if (!isBottom && unreadCount > 0) {
+            setUnreadCount(messages.length - Math.floor(contentOffset.y / 50));
+        } else {
             setUnreadCount(0);
         }
     };
@@ -489,7 +565,6 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
     useEffect(() => {
         if (!isAtBottom && messages.length > 0) {
             const newMessages = messages.slice(-unreadCount - 1).filter(msg => msg.senderId !== myId);
-            console.log("newmessages", newMessages.length);
             setUnreadCount(newMessages.length);
         }
     }, [messages.length, myId]);
@@ -506,7 +581,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         if (!message.trim()) return;
 
         try {
-            const messageRef = await firestore()
+            await firestore()
                 .collection('meet')
                 .doc(chatRoomId)
                 .collection('messages')
@@ -516,6 +591,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                     timestamp: firestore.FieldValue.serverTimestamp(),
                 });
             setMessage('');
+            flatListRef.current?.scrollToEnd({ animated: true });
         }
         catch (error) {
             console.error('Failed to send message', error);
@@ -550,8 +626,8 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
     return (
         <KeyboardAvoidingView
             style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 30 : 0}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
 
             <View style={styles.header}>
@@ -562,7 +638,6 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                 <View style={styles.buttonContainer}>
                     <CustomButton
                         onPress={create}
-
                         iconName="video-camera"
                         backgroundColor="#007AFF"
                         style={{ justifyContent: 'flex-end' }}
@@ -580,7 +655,6 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                 data={messages}
                 renderItem={renderMessage}
                 style={styles.messageList}
-                extraData={messages}
                 ref={flatListRef}
                 keyExtractor={item => item.id}
                 onScroll={handleScroll}
@@ -592,20 +666,25 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                     style={styles.textInput}
                     value={message}
                     placeholder="Type a message..."
-                    placeholderTextColor="#000"
+                    placeholderTextColor="#999"
                     multiline
                     onChangeText={setMessage} />
                 <TouchableOpacity onPress={sendMessage} style={styles.sendButton}>
                     <Icon name="paper-plane" size={20} color="#fff" />
                 </TouchableOpacity>
-                {unreadCount > 0 && (
+                {!isAtBottom && (
                     <TouchableOpacity style={styles.arrowButton} onPress={scrollToBottom}>
                         <Icon name="arrow-down" size={20} color="#fff" />
-                        <View style={styles.badge}>
-                            <Text style={styles.badgeText}>{unreadCount}</Text>
-                        </View>
+                        {unreadCount > 0 &&
+                            (
+                                <View style={styles.badge}>
+                                    <Text style={styles.badgeText}>{unreadCount}</Text>
+                                </View>
+                            )
+                        }
                     </TouchableOpacity>
                 )}
+
             </View>
         </KeyboardAvoidingView>
     )
@@ -667,13 +746,13 @@ const styles = StyleSheet.create({
         position: 'absolute',
         bottom: 20,
         right: 20,
-        backgroundColor: '#007AFF',
+        backgroundColor: 'red',
         borderRadius: 25,
         width: 50,
         height: 50,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 45
+        marginBottom: 50
     }, badge: {
         position: 'absolute',
         top: -5,
