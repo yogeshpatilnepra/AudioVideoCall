@@ -116,10 +116,14 @@ export default function CallScreen({ navigation }: CallScreenProps) {
         firestore()
             .collection('users') // Changed from 'meet' to 'users' for clarity
             .onSnapshot(snapshot => {
-                const userList = snapshot.docs
-                    .map(doc => ({ id: doc.data().id, timestamp: doc.data().timestamp }))
-                    .filter(user => user.id !== currentId); // Exclude current user
-                setUsers(userList);
+                if (snapshot && !snapshot.empty) {
+                    const userList = snapshot.docs
+                        .map(doc => ({ id: doc.data().id, timestamp: doc.data().timestamp }))
+                        .filter(user => user.id !== currentId); // Exclude current user
+                    setUsers(userList);
+                } else {
+                    setUsers([]);
+                }
             });
     };
 
@@ -227,6 +231,7 @@ export default function CallScreen({ navigation }: CallScreenProps) {
             return;
         }
         try {
+            
             await firestore().collection('users').doc(`user_${myId}`).set({
                 id: myId,
                 timestamp: firestore.FieldValue.serverTimestamp(),

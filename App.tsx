@@ -6,10 +6,12 @@ import CallScreen from './screens/CallScreen';
 import SplashScreen from './screens/SplashScreen';
 import ChatScreen from './screens/ChatScreen';
 import { AppState } from 'react-native';
+import LoginScreen from './screens/LoginScreen';
 // const Stack = createStackNavigator();
 export type RootStackParamList = {
   Splash: undefined;
   CallScreen: undefined;
+  LoginScreen: undefined;
   Chat: { myId: string; targetId: string };
 };
 
@@ -18,7 +20,13 @@ export default function App() {
   
   return (
     <NavigationContainer >
-      <Stack.Navigator initialRouteName="Splash">
+      <Stack.Navigator initialRouteName="LoginScreen">
+
+      <Stack.Screen
+          name="LoginScreen"
+          component={LoginScreen}
+          options={{ headerShown: false }}
+        />
         <Stack.Screen
           name="Splash"
           component={SplashScreen}
