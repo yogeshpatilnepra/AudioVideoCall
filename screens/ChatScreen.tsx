@@ -9,7 +9,6 @@ import { MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription 
 import { RootStackParamList } from "../App";
 import AudioCallScreen from '../components/AudioCallScreen';
 import CustomButton from '../components/Button';
-import GettingCall from '../components/GettingCall';
 import Utils from '../components/Utils';
 import Video from '../components/Video';
 
@@ -22,18 +21,19 @@ interface ChatMessage {
 
 interface ChatScreenProps {
     route: RouteProp<RootStackParamList, 'Chat'>;
-    navigation: any; // Refine if needed
+    navigation: any;
 }
 
 const configuration = {
     "iceServers": [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: "stun:stun.1.google.com:19302" },
     ]
 };
 
 const ChatScreen = ({ route }: ChatScreenProps) => {
-    const { myId, targetId } = route.params;
+    const { myId, targetId, joinCall } = route.params;
     const [message, setMessage] = useState<string>('');
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const chatRoomId = [myId, targetId].sort().join('_');
@@ -47,7 +47,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
     //new code
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-    const [gettingCall, setGettingCall] = useState(false);
+    // const [gettingCall, setGettingCall] = useState(false);
     const [isAudioCall, setIsAudioCall] = useState(false);
     const pc = useRef<RTCPeerConnection>(
         new RTCPeerConnection()
@@ -97,7 +97,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                 console.error('Failed to load ringtone:', error);
                 return;
             }
-            ringtone.setVolume(1.0); // Full volume
+            ringtone.setVolume(1.0);
             ringtoneRef.current = ringtone;
         });
 
@@ -130,36 +130,34 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         const outgoingCref = firestore().collection("meet").doc(outgoingCallId);
 
         const subscribe = cref.onSnapshot(snapshot => {
-            if (snapshot && snapshot.exists) {
-                const data = snapshot.data();
-                if (data && data.offer && data.targetId === myId && !connecting.current) {
-                    setGettingCall(true);
+            const data = snapshot.data();
+            if (data && data.offer && data.targetId === myId && !connecting.current) {
+                // setGettingCall(true);
 
-                    if (ringtoneRef.current) {
-                        ringtoneRef.current.setNumberOfLoops(-1); // Loop indefinitely
-                        ringtoneRef.current.play((success) => {
-                            if (!success) console.error('Ringtone playback failed');
-                        });
-                    }
+                if (ringtoneRef.current) {
+                    ringtoneRef.current.setNumberOfLoops(-1); // Loop indefinitely
+                    ringtoneRef.current.play((success) => {
+                        if (!success) console.error('Ringtone playback failed');
+                    });
                 }
-                if (data?.hangup) hangup();
+            }
+            if (snapshot.exists && data?.hangup) {
+                hangup();
             }
         });
 
         const subscribeOutgoing = outgoingCref.onSnapshot(snapshot => {
-            if (snapshot && snapshot.exists && snapshot.data()?.hangup) {
+            if (snapshot.exists && snapshot.data()?.hangup) {
                 hangup();
             }
         });
 
         const subscribeDelete = cref.collection(myId).onSnapshot(snapshot => {
-            if (snapshot && !snapshot.empty) {
-                snapshot.docChanges().forEach(change => {
-                    if (change.type === "removed") {
-                        hangup();
-                    }
-                });
-            }
+            snapshot.docChanges().forEach(change => {
+                if (change.type === "removed") {
+                    hangup();
+                }
+            });
         });
 
         const subscriber = firestore()
@@ -168,23 +166,22 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
             .collection('messages')
             .orderBy('timestamp', 'asc')
             .onSnapshot(snapshot => {
-                if (snapshot && !snapshot.empty) {
-                    const chatMessages = snapshot.docs.map(doc => {
-                        const data = doc.data();
-                        return {
-                            id: doc.id,
-                            text: data.text,
-                            senderId: data.senderId,
-                            timestamp: data.timestamp || null,
-                        };
-                    });
-                    setMessages(chatMessages);
-                }
+                const chatMessages = snapshot.docs.map(doc => {
+                    const data = doc.data();
+                    return {
+                        id: doc.id,
+                        text: data.text,
+                        senderId: data.senderId,
+                        timestamp: data.timestamp || null,
+                    };
+                });
+                setMessages(chatMessages);
                 // If at bottom, scroll to end automatically
                 // if (isAtBottom && chatMessages.length > 0) {
                 //     flatListRef.current?.scrollToEnd({ animated: false });
                 // }
             });
+        if (joinCall) join();
 
         return () => {
             subscription.remove();
@@ -194,27 +191,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
             subscribeDelete();
             if (ringtoneRef.current) ringtoneRef.current.stop();
         };
-    }, [chatRoomId, isAtBottom, myId, targetId]);
-
-    //set up a webrtc connection between the peer connections
-    const setupWebrtc = async (audioOnly = false) => {
-        if (pc.current) {
-            pc.current.close();
-            pc.current = new RTCPeerConnection(configuration);
-        }
-        await streamCleanup();
-
-        stream = audioOnly ? await Utils.getAudioStream() : await Utils.getStream();
-        if (!stream) throw new Error("Failed to get stream");
-        setLocalStream(stream);
-        stream.getTracks().forEach(track => {
-            pc.current?.addTrack(track, stream!);
-        });
-
-        (pc.current as any).ontrack = (event: any) => {
-            setRemoteStream(event.streams[0]);
-        };
-    };
+    }, [chatRoomId, isAtBottom, myId, targetId, joinCall]);
 
     //video call only 
     const create = async () => {
@@ -367,7 +344,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
     //call join or accept function
     const join = async () => {
         connecting.current = true;
-        setGettingCall(false);
+        // setGettingCall(false);
         if (ringtoneRef.current) ringtoneRef.current.stop();
         const callId = `${targetId}_${myId}`;
         const cref = firestore().collection("meet").doc(callId);
@@ -426,7 +403,7 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
 
     //call end function
     const hangup = async () => {
-        setGettingCall(false);
+        // setGettingCall(false);
         connecting.current = false;
         setIsAudioCall(false);
         const callId = `${myId}_${targetId}`;
@@ -459,8 +436,8 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         // Set hangup signal and clean up synchronously
         // Signal hangup only once
         await Promise.all([
-            firestore().collection('meet').doc(callId).set({ hangup: true, callerId: myId, targetId: targetId }, { merge: true }),
-            firestore().collection('meet').doc(incomingCallId).set({ hangup: true, callerId: targetId, targetId: myId }, { merge: true }),
+            firestore().collection('meet').doc(callId).set({ hangup: true }, { merge: true }),
+            firestore().collection('meet').doc(incomingCallId).set({ hangup: true }, { merge: true }),
         ]).catch(error => console.error('Failed to set hangup:', error));
 
         await streamCleanup();
@@ -472,13 +449,13 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         if (ringingToneRef.current) ringingToneRef.current.stop();
         if (cleanupTimeout.current)
             clearTimeout(cleanupTimeout.current);
-        // cleanupTimeout.current = setTimeout(async () => {
-        //     await Promise.all([
-        //         // firestoreCleanup(callId),
-        //         // firestoreCleanup(incomingCallId)
-        //     ])
-        // }, 500);
-        await cleanupFirestore();
+        cleanupTimeout.current = setTimeout(async () => {
+            await Promise.all([
+                firestoreCleanup(callId),
+                firestoreCleanup(incomingCallId)
+            ])
+        }, 500);
+        // await cleanupFirestore();
     };
 
     //all stream cleanup functions
@@ -521,43 +498,10 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         } catch (error) {
             console.error("Firestore cleanup error:", error);
         }
-    }
-
-    const cleanupFirestore = async () => {
-        setIsCleaningUp(true);
-        const callId = `${myId}_${targetId}`; // Outgoing call
-        const incomingCallId = `${targetId}_${myId}`; // Incoming call
-        const cref = firestore().collection('meet').doc(callId);
-        const incomingCref = firestore().collection('meet').doc(incomingCallId);
-
-        try {
-            // Delete ICE candidates subcollections
-            const deleteCandidates = async (docRef: any, collectionName: string) => {
-                const candidates = await docRef.collection(collectionName).get();
-                const batch = firestore().batch();
-                candidates.docs.forEach((doc: { ref: FirebaseFirestoreTypes.DocumentReference<FirebaseFirestoreTypes.DocumentData>; }) => batch.delete(doc.ref));
-                await batch.commit();
-            };
-
-            // Clean up both directions
-            await Promise.all([
-                deleteCandidates(cref, myId),
-                deleteCandidates(cref, targetId),
-                deleteCandidates(incomingCref, myId),
-                deleteCandidates(incomingCref, targetId),
-            ]);
-
-            // Delete main call documents
-            await Promise.all([
-                cref.delete(),
-                incomingCref.delete().catch(() => { }),
-            ]);
-        } catch (error) {
-            console.error('Cleanup error:', error);
-        } finally {
+        finally {
             setIsCleaningUp(false);
         }
-    };
+    }
 
     //helper function
     const collectIceCandidates = async (
@@ -653,9 +597,9 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
     }
 
     //Display the gettingcall component
-    if (gettingCall) {
-        return <GettingCall hangup={hangup} join={join} />;
-    }
+    // if (gettingCall) {
+    //     return <GettingCall hangup={hangup} join={join} />;
+    // }
 
     if (localStream) {
         return isAudioCall ? (
@@ -755,7 +699,7 @@ const styles = StyleSheet.create({
     messageContainer: {
         marginVertical: 5,
         marginHorizontal: 10,
-        padding: 10,
+        padding: 4,
         borderRadius: 8,
         maxWidth: '80%',
     },
@@ -769,7 +713,7 @@ const styles = StyleSheet.create({
     },
     messageText: {
         color: '#fff',
-        fontSize: 16,
+        fontSize: 14,
     },
     timestamp: {
         fontSize: 12,

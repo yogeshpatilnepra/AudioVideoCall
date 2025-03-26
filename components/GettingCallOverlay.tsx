@@ -1,27 +1,31 @@
+import { NavigationContainerRef, NavigationProp } from "@react-navigation/native";
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import Icon from "react-native-vector-icons/FontAwesome";
+import { RootStackParamList } from "../App";
 const { width } = Dimensions.get('window');
+import Icon from "react-native-vector-icons/FontAwesome";
 
 interface GettingCallOverlayProps {
-    callerId: string | null;
-    join: () => void;
-    hangup: () => void;
-    visible: boolean;
+    callerId: string;
+    onAccept: (callType?: string) => void;
+    onHangup: () => void;
+    navigation: NavigationContainerRef<RootStackParamList>;
 }
 
-export const GettingCallOverlay: React.FC<GettingCallOverlayProps> = ({ callerId, join, hangup, visible }) => {
-    if (!visible || !callerId) return null;
+export const GettingCallOverlay: React.FC<GettingCallOverlayProps> = ({ callerId,
+    onAccept,
+    onHangup,
+    navigation, }) => {
 
     return (
         <View style={styles.overlay}>
             <View style={styles.notification}>
                 <Text style={styles.callerText}>Call from {callerId}</Text>
                 <View style={styles.buttonContainer}>
-                    <TouchableOpacity style={styles.acceptButton} onPress={join}>
+                    <TouchableOpacity style={styles.acceptButton} onPress={() =>onAccept()}>
                         <Icon name="phone" size={20} color="#fff" />
                         <Text style={styles.buttonText}>Join</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.rejectButton} onPress={hangup}>
+                    <TouchableOpacity style={styles.rejectButton} onPress={onHangup}>
                         <Icon name="phone-slash" size={20} color="#fff" />
                         <Text style={styles.buttonText}>Hangup</Text>
                     </TouchableOpacity>

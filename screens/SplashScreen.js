@@ -19,7 +19,7 @@ const SplashScreen = () => {
 
             <View style={styles.bottomSection}>
                 <Text style={styles.scanDescription}>
-                   Start Audio and Video call.
+                    Start Audio and Video call.
                 </Text>
                 <TouchableOpacity style={styles.startButton} onPress={handleStart}>
                     <Text style={styles.startButtonText}>Let's Start</Text>
@@ -28,7 +28,6 @@ const SplashScreen = () => {
         </View>
     );
 };
-
 
 const styles = StyleSheet.create({
     container: {

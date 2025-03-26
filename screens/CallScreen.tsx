@@ -7,11 +7,11 @@ import {
 } from 'react-native';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
+import firestore from '@react-native-firebase/firestore';
 import { NavigationProp } from '@react-navigation/native';
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, Text, TouchableOpacity } from 'react-native';
-import { MediaStream, RTCIceCandidate, RTCPeerConnection } from 'react-native-webrtc';
+import { MediaStream, RTCPeerConnection } from 'react-native-webrtc';
 import { RootStackParamList } from '../App';
 
 const configuration = {
@@ -71,45 +71,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
         loadId();
     }, []);
 
-    useEffect(() => {
-        if (!myId || !targetId) return;
-
-        const callId = `${targetId}_${myId}`; // Incoming call
-        const outgoingCallId = `${myId}_${targetId}`; // Outgoing call
-        const cref = firestore().collection("meet").doc(callId);
-        const outgoingCref = firestore().collection("meet").doc(outgoingCallId);
-
-        const subscribe = cref.onSnapshot(snapshot => {
-            const data = snapshot.data();
-            if (data && data.offer && data.targetId === myId && !connecting.current) {
-                setGettingCall(true);
-            }
-            if (snapshot.exists && data?.hangup) {
-                hangup();
-            }
-        });
-
-        const subscribeOutgoing = outgoingCref.onSnapshot(snapshot => {
-            const data = snapshot.data();
-            if (snapshot.exists && data?.hangup) {
-                hangup();
-            }
-        });
-
-        const subscrbeDelete = cref.collection(myId).onSnapshot(snapshot => {
-            snapshot.docChanges().forEach(change => {
-                if (change.type === "removed") {
-                    hangup();
-                }
-            });
-        });
-        return () => {
-            subscribe();
-            subscribeOutgoing();
-            subscrbeDelete();
-        };
-    }, [myId, targetId]);
-
     //fetch users
     const fetchUsers = (currentId: string) => {
         if (!currentId || currentId.length !== 5 || !/^\d+$/.test(currentId)) return;
@@ -129,101 +90,11 @@ export default function CallScreen({ navigation }: CallScreenProps) {
 
 
     //call end function
-    const hangup = async () => {
-        setGettingCall(false);
-        connecting.current = false;
-        setIsAudioCall(false);
-        const callId = myId && targetId ? `${myId}_${targetId}` : "chatId";
-        const incomingCallId = myId && targetId ? `${targetId}_${myId}` : "chatId";
-        const cref = firestore().collection("meet").doc(callId);
-        const incomingCref = firestore().collection("meet").doc(incomingCallId);
-
-        if (callStartTime.current && myId && isEnabled) {
-            const endTime = Date.now();
-            const duration = Math.floor((endTime - callStartTime.current) / 1000);
-            const callType = isAudioCall ? "audio" : "video";
-            const otherUserId = targetId;
-
-            const historyDoc = {
-                otherUserId,
-                startTime: firestore.Timestamp.fromMillis(callStartTime.current),
-                endTime: firestore.Timestamp.fromMillis(endTime),
-                duration,
-                callType,
-            };
-
-            await firestore()
-                .collection("meet")
-                .doc(myId)
-                .collection("callHistory")
-                .add(historyDoc)
-                .then(() => console.log("Call history saved:", historyDoc))
-                .catch(error => console.error("Failed to save call history:", error));
-            callStartTime.current = null;
-        }
-
-        // Set hangup signal and clean up synchronously
-        await Promise.all([
-            cref.set({ hangup: true }, { merge: true }).catch(error => console.error("Failed to set hangup (outgoing):", error)),
-            incomingCref.set({ hangup: true }, { merge: true }).catch(error => console.error("Failed to set hangup (incoming):", error))
-        ]);
-
-        await streamCleanup();
-        if (pc.current) {
-            pc.current.close();
-            pc.current = new RTCPeerConnection(configuration);
-        }
-
-        await Promise.all([
-            firestoreCleanup(callId),
-            firestoreCleanup(incomingCallId)
-        ]).then(() => console.log("Firestore cleanup completed"))
-            .catch(error => console.error("Firestore cleanup failed:", error));
-    };
 
     //all stream cleanup functions
-    const streamCleanup = async () => {
-        const stopTracks = (mediaStream: MediaStream) => {
-            if (mediaStream) {
-                mediaStream.getTracks().forEach(track => {
-                    track.stop();
-                });
-            }
-        };
-        stopTracks(stream!)
-        stopTracks(localStream!)
-        stopTracks(remoteStream!)
 
-        if (pc.current) {
-            pc.current?.getSenders().forEach(sender => {
-                if (sender.track) sender.track.stop();
-                pc.current?.removeTrack(sender);
-            });
-        }
-        stream = null;
-        setLocalStream(null);
-        setRemoteStream(null);
-    };
     //Firestore data clear or delete function
-    const firestoreCleanup = async (callId: string) => {
-        const cref = firestore().collection("meet").doc(callId);
 
-        try {
-            const [callerCandidates, calleeCandidates] = await Promise.all([
-                cref.collection(myId || "caller").get(),
-                cref.collection(targetId || "callee").get()
-            ]);
-            const deletePromises = [
-                ...callerCandidates.docs.map(candidate => candidate.ref.delete()),
-                ...calleeCandidates.docs.map(candidate => candidate.ref.delete()),
-                cref.delete()
-            ];
-            await Promise.all(deletePromises);
-        } catch (error) {
-            console.error("Firestore cleanup error:", error);
-        }
-
-    }
     //Save id on button
     const saveId = async () => {
         if (myId.length !== 5 || !/^\d+$/.test(myId)) {
@@ -231,7 +102,7 @@ export default function CallScreen({ navigation }: CallScreenProps) {
             return;
         }
         try {
-            
+
             await firestore().collection('users').doc(`user_${myId}`).set({
                 id: myId,
                 timestamp: firestore.FieldValue.serverTimestamp(),
@@ -239,6 +110,7 @@ export default function CallScreen({ navigation }: CallScreenProps) {
             await AsyncStorage.setItem('myId', myId);
             setShowInput(false);
             fetchUsers(myId);
+            navigation.navigate('CallScreen', { myId });
             Alert.alert('Success', `ID ${myId} saved`);
         } catch (error) {
             Alert.alert('Error', 'Failed to save ID: ' + error);
@@ -297,39 +169,6 @@ export default function CallScreen({ navigation }: CallScreenProps) {
         }
     };
 
-    //helper function
-    const collectIceCandidates = async (
-        cref: FirebaseFirestoreTypes.DocumentReference<FirebaseFirestoreTypes.DocumentData>,
-        localName: string,
-        remoteName: string
-    ) => {
-        const candidateCollection = cref.collection(localName);
-        if (pc.current) {
-            (pc.current as any).onicecandidate = (event: any) => {
-                if (event.candidate) {
-                    candidateCollection.add(event.candidate)
-                        .catch(error => console.error("Failed to add ICE candidate:", error));
-                }
-            };
-        }
-        return () => {
-            cref.collection(remoteName).onSnapshot(snapshot => {
-                snapshot.docChanges().forEach((change: any) => {
-                    if (change.type === "added") {
-                        const candidate = new RTCIceCandidate(change.doc.data());
-                        if (pc.current && pc.current.remoteDescription) {
-                            pc.current.addIceCandidate(candidate)
-                                .catch(error => console.error("Failed to apply ICE candidate:", error));
-                        } else {
-                            console.warn("Skipping ICE candidate: remote description not set yet");
-                        }
-                        // pc.current?.addIceCandidate(candidate).catch(error => console.error("Failed to apply ICE candidate:", error));
-                    }
-                });
-            });
-        }
-
-    };
 
     //displays the call button 
     return (
