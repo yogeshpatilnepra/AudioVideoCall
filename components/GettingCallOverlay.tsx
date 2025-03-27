@@ -6,12 +6,13 @@ import Icon from "react-native-vector-icons/FontAwesome";
 
 interface GettingCallOverlayProps {
     callerId: string;
+    callType?: string;
     onAccept: (callType?: string) => void;
     onHangup: () => void;
     navigation: NavigationContainerRef<RootStackParamList>;
 }
 
-export const GettingCallOverlay: React.FC<GettingCallOverlayProps> = ({ callerId,
+export const GettingCallOverlay: React.FC<GettingCallOverlayProps> = ({ callerId, callType,
     onAccept,
     onHangup,
     navigation, }) => {
@@ -19,14 +20,15 @@ export const GettingCallOverlay: React.FC<GettingCallOverlayProps> = ({ callerId
     return (
         <View style={styles.overlay}>
             <View style={styles.notification}>
+                <Text style={styles.callerText}>{callType} Call</Text>
                 <Text style={styles.callerText}>Call from {callerId}</Text>
                 <View style={styles.buttonContainer}>
-                    <TouchableOpacity style={styles.acceptButton} onPress={() =>onAccept()}>
+                    <TouchableOpacity style={styles.acceptButton} onPress={() => onAccept()}>
                         <Icon name="phone" size={20} color="#fff" />
                         <Text style={styles.buttonText}>Join</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.rejectButton} onPress={onHangup}>
-                        <Icon name="phone-slash" size={20} color="#fff" />
+                        <Icon name="phone" size={20} color="#fff" />
                         <Text style={styles.buttonText}>Hangup</Text>
                     </TouchableOpacity>
                 </View>

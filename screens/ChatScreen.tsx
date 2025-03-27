@@ -72,41 +72,41 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
     const ringingToneRef = useRef<Sound | null>(null);
     const [isCleaningUp, setIsCleaningUp] = useState(false);
 
-    useEffect(() => {
-        Sound.setCategory('Playback', true);
-        const ringingTone = new Sound('ringtone.mp3', Sound.MAIN_BUNDLE, (error) => {
-            if (error) {
-                console.error('Failed to load ringing tone:', error);
-                return;
-            }
-            ringingTone.setVolume(0.5); // Adjust volume as needed
-            ringingToneRef.current = ringingTone;
-        });
+    // useEffect(() => {
+    //     Sound.setCategory('Playback', true);
+    //     const ringingTone = new Sound('phonetone.mp3', Sound.MAIN_BUNDLE, (error) => {
+    //         if (error) {
+    //             console.error('Failed to load ringing tone:', error);
+    //             return;
+    //         }
+    //         ringingTone.setVolume(0.5); // Adjust volume as needed
+    //         ringingToneRef.current = ringingTone;
+    //     });
 
-        return () => {
-            if (ringingToneRef.current) {
-                ringingToneRef.current.stop(() => ringingToneRef.current!.release());
-            }
-        };
-    }, []);
+    //     return () => {
+    //         if (ringingToneRef.current) {
+    //             ringingToneRef.current.stop(() => ringingToneRef.current!.release());
+    //         }
+    //     };
+    // }, []);
 
-    useEffect(() => {
-        Sound.setCategory('Playback', true); // iOS category for playback
-        const ringtone = new Sound('ringtone.mp3', Sound.MAIN_BUNDLE, (error) => {
-            if (error) {
-                console.error('Failed to load ringtone:', error);
-                return;
-            }
-            ringtone.setVolume(1.0);
-            ringtoneRef.current = ringtone;
-        });
+    // useEffect(() => {
+    //     Sound.setCategory('Playback', true); // iOS category for playback
+    //     const ringtone = new Sound('phonetone.mp3', Sound.MAIN_BUNDLE, (error) => {
+    //         if (error) {
+    //             console.error('Failed to load ringtone:', error);
+    //             return;
+    //         }
+    //         ringtone.setVolume(1.0);
+    //         ringtoneRef.current = ringtone;
+    //     });
 
-        return () => {
-            if (ringtoneRef.current) {
-                ringtoneRef.current.stop(() => ringtoneRef.current!.release());
-            }
-        };
-    }, []);
+    //     return () => {
+    //         if (ringtoneRef.current) {
+    //             ringtoneRef.current.stop(() => ringtoneRef.current!.release());
+    //         }
+    //     };
+    // }, []);
 
     useEffect(() => {
         const handleAppStateChange = async (nextAppState: AppStateStatus) => {
@@ -467,7 +467,6 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
                 });
             }
         };
-        stopTracks(stream!)
         stopTracks(localStream!)
         stopTracks(remoteStream!)
 

@@ -21,6 +21,7 @@
     "debounce": "^2.2.0",
     "react": "19.0.0",
     "react-native": "0.78.0",
+    "react-native-device-info": "^14.0.4",
     "react-native-gesture-handler": "^2.24.0",
     "react-native-incall-manager": "^4.2.0",
     "react-native-safe-area-context": "^5.3.0",

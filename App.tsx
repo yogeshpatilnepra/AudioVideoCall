@@ -5,7 +5,9 @@ import auth from '@react-native-firebase/auth';
 import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import { Modal } from 'react-native';
+import { AppState, AppStateStatus, Modal } from 'react-native';
+import DeviceInfo from 'react-native-device-info';
+import Sound from 'react-native-sound';
 import { MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription } from 'react-native-webrtc';
 import AudioCallScreen from './components/AudioCallScreen';
 import { GettingCallOverlay } from './components/GettingCallOverlay';
@@ -41,6 +43,40 @@ export default function App() {
   const pc = useRef<RTCPeerConnection>(new RTCPeerConnection(configuration));
   const connecting = useRef(false);
   const [gettingCall, setGettingCall] = useState(false);
+
+  const ringtoneRef = useRef<Sound | null>(null);
+  const [uniqueId, setUniqueId] = useState('');
+
+  useEffect(() => {
+    const fetchUniqueId = async () => {
+      const id = await DeviceInfo.getUniqueId();
+      setUniqueId(id);
+    };
+
+    fetchUniqueId();
+  }, []);
+
+  console.log("uniqueId--->", uniqueId);
+
+  //ringtone play on other phone while call-- code for play sound
+  useEffect(() => {
+    Sound.setCategory('Playback', true); // iOS category for playback
+    const ringtone = new Sound('ringtone.mp3', Sound.MAIN_BUNDLE, (error) => {
+      if (error) {
+        console.error('Failed to load ringtone:', error);
+        return;
+      }
+      ringtone.setVolume(1.0);
+      ringtoneRef.current = ringtone;
+    });
+
+    return () => {
+      if (ringtoneRef.current) {
+        ringtoneRef.current.stop(() => ringtoneRef.current!.release());
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const loadId = async () => {
       const savedId = await AsyncStorage.getItem('myId');
@@ -58,6 +94,23 @@ export default function App() {
   }, [myId]);
 
   useEffect(() => {
+
+    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        if (incomingCall) {
+          const callId = `${myId}_${incomingCall.callerId}`;
+          const incomingCallId = `${incomingCall.callerId}_${myId}`;
+          await Promise.all([
+            firestore().collection('meet').doc(callId).set({ hangup: true }, { merge: true }),
+            firestore().collection('meet').doc(incomingCallId).set({ hangup: true }, { merge: true }),
+          ]).catch(error => console.error('Failed to signal hangup:', error));
+          await handleHangup();
+        }
+
+      }
+    };
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
     if (!myId) return;
     console.log('Listening for calls with myId:', myId); // Debug log
     const subscribe = firestore()
@@ -65,31 +118,44 @@ export default function App() {
       .where('targetId', '==', myId)
       .onSnapshot(snapshot => {
         console.log('Snapshot received:', snapshot.docs.length);
-        snapshot.docChanges().forEach(change => {
+        snapshot.docChanges().forEach(async change => {
           console.log('Change:', change.type, change.doc.data());
           if (change.type === 'added' && !incomingCall && !localStream) {
             const data = change.doc.data();
             if (data.offer && !data.hangup) {
               setIncomingCall({ callerId: data.callerId, callId: change.doc.id, callType: data.callType });
               setGettingCall(true);
+              if (ringtoneRef.current) {
+                ringtoneRef.current.setNumberOfLoops(-1); // Loop indefinitely
+                ringtoneRef.current.play((success) => {
+                  if (!success) console.error('Ringtone playback failed');
+                });
+              }
             }
           } else if (change.type === 'modified') {
             const data = change.doc.data();
             if (data.hangup) {
               setIncomingCall(null);
               setGettingCall(false);
-              streamCleanup();
+              if (pc.current) pc.current.close();
+              pc.current = new RTCPeerConnection(configuration);
+              await streamCleanup();
             }
           }
         });
       }, error => console.error('Firestore listener error:', error),
       );
-    return () => subscribe();
-  }, [myId, incomingCall, localStream]);
+    return () => {
+      if (ringtoneRef.current) ringtoneRef.current!.release();
+      subscription.remove();
+      subscribe();
+    }
+  }, [myId, incomingCall, localStream,]);
 
   const handleAccept = async (callType?: string) => {
     if (incomingCall) {
       setGettingCall(false)
+      if (ringtoneRef.current) ringtoneRef.current.stop();
       await setupCall(callType);
       if (callType === 'audio' || callType === 'video' || callType === undefined) {
         setIncomingCall({ ...incomingCall, callType, accepted: true });
@@ -142,19 +208,16 @@ export default function App() {
       pc.current = new RTCPeerConnection(configuration);
       setIncomingCall(null);
       setGettingCall(false);
+      if (ringtoneRef.current) ringtoneRef.current.stop();
       await firestoreCleanup(incomingCall.callId);
     }
   };
 
   const streamCleanup = async () => {
-    if (localStream) localStream.getTracks().forEach(track => track.stop());
-    if (remoteStream) remoteStream.getTracks().forEach(track => track.stop());
 
-    const stopTracks = (mediaStream: MediaStream) => {
+    const stopTracks = (mediaStream: MediaStream | null) => {
       if (mediaStream) {
-        mediaStream.getTracks().forEach(track => {
-          track.stop();
-        });
+        mediaStream.getTracks().forEach(track => track.stop());
       }
     };
     stopTracks(localStream!)
@@ -162,7 +225,10 @@ export default function App() {
 
     if (pc.current) {
       pc.current?.getSenders().forEach(sender => {
-        if (sender.track) sender.track.stop();
+        console.log("TRACKSSSSS", sender.track)
+        if (sender.track) {
+          sender.track.stop();
+        }
         pc.current?.removeTrack(sender);
       });
     }
@@ -234,6 +300,7 @@ export default function App() {
         <Modal transparent visible={!!incomingCall} animationType="slide">
           {gettingCall ? (
             <GettingCallOverlay
+              callType={incomingCall.callType}
               callerId={incomingCall.callerId}
               onAccept={() => handleAccept(incomingCall.callType)}
               onHangup={handleHangup}
