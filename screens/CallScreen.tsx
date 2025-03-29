@@ -63,7 +63,7 @@ export default function CallScreen({ navigation }: CallScreenProps) {
             if (savedId) {
                 setMyId(savedId);
                 setShowInput(false);
-                fetchUsers(savedId); // Fetch users immediately if ID exists
+                fetchUsers(savedId);
             } else {
                 setShowInput(true);
             }
@@ -79,9 +79,13 @@ export default function CallScreen({ navigation }: CallScreenProps) {
             .onSnapshot(snapshot => {
                 if (snapshot && !snapshot.empty) {
                     const userList = snapshot.docs
-                        .map(doc => ({ id: doc.data().id, timestamp: doc.data().timestamp }))
-                        .filter(user => user.id !== currentId); // Exclude current user
+                        .map(doc => ({
+                            id: doc.data().id ,
+                            timestamp: doc.data().timestamp
+                        }))
+                        .filter(user => user.id !== currentId);
                     setUsers(userList);
+                    console.log("USERSSS", userList)
                 } else {
                     setUsers([]);
                 }
@@ -198,7 +202,9 @@ export default function CallScreen({ navigation }: CallScreenProps) {
                         <FlatList
                             data={users}
                             renderItem={renderUser}
-                            keyExtractor={item => item.id}
+                            keyExtractor={(item, index) => {
+                                return item.id;
+                            }}
                             ListHeaderComponent={<Text style={styles.header}>Users List</Text>}
                         />
                     )}

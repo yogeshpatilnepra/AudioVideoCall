@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+import notifee from '@notifee/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import auth from '@react-native-firebase/auth';
+import { getAuth } from '@react-native-firebase/auth';
 import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
+import messaging from '@react-native-firebase/messaging';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import { AppState, AppStateStatus, Modal } from 'react-native';
-import DeviceInfo from 'react-native-device-info';
+import { AppState, AppStateStatus, Modal, PermissionsAndroid, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Sound from 'react-native-sound';
 import { MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription } from 'react-native-webrtc';
 import AudioCallScreen from './components/AudioCallScreen';
@@ -32,6 +33,21 @@ const configuration = {
   ]
 };
 const Stack = createStackNavigator<RootStackParamList>();
+
+const ChatNotificationOverlay = ({ senderId, message, onDismiss }: { senderId: string; message: string; onDismiss: () => void }) => (
+  <Modal transparent visible animationType="slide">
+    <View style={styles.overlayContainer}>
+      <View style={styles.chatNotification}>
+        <Text style={styles.chatTitle}>New Message from {senderId}</Text>
+        <Text style={styles.chatBody}>{message}</Text>
+        <TouchableOpacity style={styles.dismissButton} onPress={onDismiss}>
+          <Text style={styles.buttonText}>Dismiss</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </Modal>
+);
+
 export default function App() {
 
   const [myId, setMyId] = useState<string | null>(null);
@@ -47,14 +63,43 @@ export default function App() {
   const ringtoneRef = useRef<Sound | null>(null);
   const [uniqueId, setUniqueId] = useState('');
 
+  //for the chat notification
+  const [chatNotification, setChatNotification] = useState<{ senderId: string; message: string } | null>(null);
+  const [myFcmToken, setMyFcmToken] = useState<string | null>(null);
+
   useEffect(() => {
-    const fetchUniqueId = async () => {
-      const id = await DeviceInfo.getUniqueId();
-      setUniqueId(id);
+    const setupFcm = async () => {
+      if (Platform.OS === 'android' && Platform.Version >= 33) {
+        await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+      }
+      const authStatus = await messaging().requestPermission();
+      if (authStatus === messaging.AuthorizationStatus.AUTHORIZED) {
+        const token = await messaging().getToken();
+        console.log('FCM Token:', token);
+        if (myId) {
+          await firestore().collection('users').doc(myId).set({ fcmToken: token }, { merge: true });
+        }
+      }
+
     };
 
-    fetchUniqueId();
-  }, []);
+    // Handle auth state
+    const unsubscribeAuth = getAuth().onAuthStateChanged(user => {
+      if (user && !myId) setMyId(user.uid);
+    });
+
+    setupFcm();
+    return () => unsubscribeAuth();
+  }, [myId]);
+
+  // useEffect(() => {
+  //   const fetchUniqueId = async () => {
+  //     const id = await DeviceInfo.getUniqueId();
+  //     setUniqueId(id);
+  //   };
+
+  //   fetchUniqueId();
+  // }, []);
 
   console.log("uniqueId--->", uniqueId);
 
@@ -86,15 +131,117 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const unsubscribeAuth = auth().onAuthStateChanged(user => {
+    const unsubscribeAuth = getAuth().onAuthStateChanged(user => {
       if (user && !myId) setMyId(user.uid);
     });
 
     return () => unsubscribeAuth();
   }, [myId]);
 
-  useEffect(() => {
 
+  useEffect(() => {
+    const unsubscribeForeground = messaging().onMessage(async (remoteMessage) => {
+      const { title, body, type } = remoteMessage.data || {};
+      if (type === 'call' && !incomingCall) {
+        // Call notification handled by Firestore listener, but ensure no overlap
+        console.log('Call notification received:', title, body);
+      } else if (type === 'chat') {
+        setChatNotification({ senderId: remoteMessage.data!.senderId.toString(), message: body.toString() });
+      }
+    });
+
+    messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+      console.log('Background notification:', remoteMessage);
+    });
+
+    messaging().getInitialNotification().then((remoteMessage) => {
+      if (remoteMessage) {
+        handleNotificationTap(remoteMessage);
+      }
+    });
+
+    const unsubscribeTap = messaging().onNotificationOpenedApp((remoteMessage) => {
+      handleNotificationTap(remoteMessage);
+    });
+
+    return () => {
+      unsubscribeForeground();
+      unsubscribeTap();
+    };
+  }, [incomingCall]);
+
+  useEffect(() => {
+    if (!myId) return;
+
+    const chatSubscribe = firestore()
+      .collection('notifications')
+      .where('targetId', '==', myId)
+      .onSnapshot((snapshot) => {
+        snapshot.docChanges().forEach(async (change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            if (data.type === 'chat' && AppState.currentState === 'active') {
+              setChatNotification({ senderId: data.senderId || 'Unknown', message: data.message || '' });
+              // await displayNotification('New Message', `${data.senderId || 'Unknown'}: ${data.message || ''}`, 'chat', data.senderId || 'Unknown');
+              await change.doc.ref.delete();
+            }
+          }
+        });
+      });
+
+    return () => {
+      chatSubscribe();
+    };
+  }, [myId]);
+
+  const displayNotification = async (title: string, body: string, type: 'chat' | 'call', senderId: string) => {
+    await notifee.displayNotification({
+      title,
+      body,
+      data: { type, senderId },
+      android: { channelId: 'default', sound: 'default', pressAction: { id: 'default' } },
+      ios: { sound: 'default' },
+    });
+  };
+
+  // Step 7: Handle FCM Background and Tap
+  useEffect(() => {
+    const unsubscribeForeground = messaging().onMessage(async (remoteMessage) => {
+      const { type, senderId, body } = remoteMessage.data || {};
+      if (type === 'chat' && AppState.currentState === 'active') {
+        setChatNotification({ senderId: senderId.toString() || 'Unknown', message: body.toString() || '' });
+      }
+    });
+
+    messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+      console.log('Background notification:', remoteMessage);
+    });
+
+    messaging().onNotificationOpenedApp((remoteMessage) => {
+      handleNotificationTap(remoteMessage);
+    });
+
+    messaging().getInitialNotification().then((remoteMessage) => {
+      if (remoteMessage) handleNotificationTap(remoteMessage);
+    });
+
+    return () => unsubscribeForeground();
+  }, []);
+
+  const handleNotificationTap = (remoteMessage: any) => {
+    const { type, senderId, body } = remoteMessage.data || {};
+    if (type === 'chat') {
+      setChatNotification({ senderId: senderId || 'Unknown', message: body || '' });
+    }
+    //  else if (type === 'call' && !incomingCall && myId && senderId) {
+    //   navigationRef.current?.navigate('Chat', {
+    //     myId,
+    //     targetId: senderId as string,
+    //     joinCall: true
+    //   });
+    // }
+  };
+  useEffect(() => {
     const handleAppStateChange = async (nextAppState: AppStateStatus) => {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
         if (incomingCall) {
@@ -273,6 +420,16 @@ export default function App() {
     };
   };
 
+  notifee.createChannel({
+    id: 'default',
+    name: 'Default Channel',
+    sound: 'default',
+  });
+
+  const handleChatDismiss = () => {
+    setChatNotification(null);
+  };
+
   return (
     <NavigationContainer ref={navigationRef}>
       <Stack.Navigator initialRouteName="Splash">
@@ -324,6 +481,49 @@ export default function App() {
         </Modal>
       )}
 
+      {chatNotification && (
+        <ChatNotificationOverlay
+          senderId={chatNotification.senderId}
+          message={chatNotification.message}
+          onDismiss={handleChatDismiss}
+        />
+      )}
+
     </NavigationContainer>
   );
 }
+const styles = StyleSheet.create({
+  //for chat notification
+  overlayContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  chatNotification: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 10,
+    width: '80%',
+    alignItems: 'center',
+  },
+  chatTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  chatBody: {
+    fontSize: 16,
+    marginBottom: 20,
+  },
+  dismissButton: {
+    backgroundColor: '#007AFF',
+    padding: 10,
+    borderRadius: 5,
+  },
+  buttonText: {
+    color: '#fff',
+    marginLeft: 5,
+    fontSize: 14,
+  },
+})

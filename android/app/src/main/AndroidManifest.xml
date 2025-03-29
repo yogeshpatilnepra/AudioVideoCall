@@ -46,5 +46,8 @@
       <service
 	    android:name="app.notifee.core.ForegroundService"
 	    android:foregroundServiceType="mediaProjection|camera|microphone" />
+      <meta-data
+      android:name="io.invertase.notifee.default_channel_id"
+      android:value="default" />
     </application>
 </manifest>

@@ -617,12 +617,47 @@ const ChatScreen = ({ route }: ChatScreenProps) => {
         );
     }
 
+    //code for the notification 
+    const sendChatOrCall = async (targetId: string, type: 'chat' | 'call', message?: string) => {
+        if (type === 'chat' && message) {
+            await firestore()
+                .collection('notifications')
+                .add({
+                    targetId,
+                    senderId: myId,
+                    message,
+                    type,
+                    timestamp: firestore.FieldValue.serverTimestamp(),
+                });
+        } else if (type === 'call') {
+            const offer = await pc.current.createOffer({});
+            await firestore()
+                .collection('meet')
+                .doc(`${myId}_${targetId}`)
+                .set({
+                    callerId: myId,
+                    targetId,
+                    offer: { type: offer.type, sdp: offer.sdp },
+                    hangup: false,
+                    callType: 'video',
+                }, { merge: true });
+        }
+    };
+
     return (
         <KeyboardAvoidingView
             style={styles.container}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
+
+            <TouchableOpacity onPress={() => sendChatOrCall(targetId, 'chat', 'Hello!')}>
+                <Text>Send Chat</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => sendChatOrCall(targetId, 'call')}>
+                <Text>Start Call</Text>
+            </TouchableOpacity>
+
 
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>

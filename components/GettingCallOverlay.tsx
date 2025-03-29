@@ -1,5 +1,5 @@
 import { NavigationContainerRef, NavigationProp } from "@react-navigation/native";
-import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Dimensions, Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { RootStackParamList } from "../App";
 const { width } = Dimensions.get('window');
 import Icon from "react-native-vector-icons/FontAwesome";
@@ -87,9 +87,5 @@ const styles = StyleSheet.create({
         flex: 1,
         marginLeft: 5,
     },
-    buttonText: {
-        color: '#fff',
-        marginLeft: 5,
-        fontSize: 14,
-    },
+   
 })
